@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DevOps Testing Application</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 40px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        .section {
+            margin: 20px 0;
+            padding: 15px;
+            border-left: 4px solid #007bff;
+            background-color: #f8f9fa;
+        }
+        .btn {
+            background-color: #007bff;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        .btn:hover {
+            background-color: #0056b3;
+        }
+        #results {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #e9ecef;
+            border-radius: 4px;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>DevOps Testing Application</h1>
+        
+        <div class="section">
+            <h3>Users API</h3>
+            <button class="btn" onclick="getUsers()">Get All Users</button>
+            <button class="btn" onclick="getUser(1)">Get User 1</button>
+        </div>
+        
+        <div class="section">
+            <h3>Products API</h3>
+            <button class="btn" onclick="getProducts()">Get All Products</button>
+            <button class="btn" onclick="getProduct(1)">Get Product 1</button>
+        </div>
+        
+        <div class="section">
+            <h3>System Status</h3>
+            <button class="btn" onclick="healthCheck()">Health Check</button>
+        </div>
+        
+        <div id="results"></div>
+    </div>
+
+    <script>
+        async function apiCall(url, method = 'GET') {
+            try {
+                const response = await fetch(url, { method });
+                const data = await response.json();
+                document.getElementById('results').textContent = JSON.stringify(data, null, 2);
+            } catch (error) {
+                document.getElementById('results').textContent = 'Error: ' + error.message;
+            }
+        }
+        
+        function getUsers() {
+            apiCall('/api/users/');
+        }
+        
+        function getUser(id) {
+            apiCall(`/api/users/${id}`);
+        }
+        
+        function getProducts() {
+            apiCall('/api/products/');
+        }
+        
+        function getProduct(id) {
+            apiCall(`/api/products/${id}`);
+        }
+        
+        function healthCheck() {
+            apiCall('/health');
+        }
+    </script>
+</body>
+</html>
