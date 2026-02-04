@@ -297,18 +297,21 @@ pipeline {
         stage('Push to Docker Hub') {
             steps {
                 script {
-                    withCredentials([usernamePassword(
-                        credentialsId: DOCKER_CREDENTIALS_ID,
-                        usernameVariable: 'DOCKER_USER',
-                        passwordVariable: 'DOCKER_PASS'
-                    )]) {
-                        sh """
+                    sh """
+                        # Read credentials from secrets files
+                        DOCKER_USER=\$(cat /var/jenkins_home/secrets/docker-username 2>/dev/null || echo '')
+                        DOCKER_PASS=\$(cat /var/jenkins_home/secrets/docker-password 2>/dev/null || echo '')
+                        
+                        if [ -n "\$DOCKER_USER" ] && [ -n "\$DOCKER_PASS" ]; then
                             echo "\$DOCKER_PASS" | docker login -u "\$DOCKER_USER" --password-stdin
                             docker push ${DOCKER_IMAGE}:${VERSION_TAG}
                             docker push ${DOCKER_IMAGE}:latest
                             docker logout
-                        """
-                    }
+                        else
+                            echo "Docker credentials not found, skipping push"
+                            exit 1
+                        fi
+                    """
                     
                     echo "✅ Pushed ${DOCKER_IMAGE}:${VERSION_TAG} to Docker Hub"
                 }
