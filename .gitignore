@@ -68,4 +68,5 @@ terraform.rc
 # Secrets (NEVER commit)
 *.pem
 *.key
-secrets/
+secrets/plan.out
+.cursor/

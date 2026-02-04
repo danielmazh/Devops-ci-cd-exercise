@@ -1,0 +1,230 @@
+# =============================================================================
+# Jenkins Configuration as Code (CasC)
+# =============================================================================
+# Auto-configures Jenkins on startup
+# Environment variables are injected by Docker/Ansible
+# =============================================================================
+
+jenkins:
+  systemMessage: |
+    ╔══════════════════════════════════════════════════════════════╗
+    ║  DevOps Testing App - CI/CD Pipeline Server                  ║
+    ║  Environment: ${ENVIRONMENT:-staging}                        ║
+    ║  Managed by Configuration as Code                            ║
+    ╚══════════════════════════════════════════════════════════════╝
+    
+  numExecutors: 4
+  mode: NORMAL
+  labelString: "master"
+  
+  # Security Realm - Local users
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: "${JENKINS_ADMIN_ID:-admin}"
+          name: "Administrator"
+          password: "${JENKINS_ADMIN_PASSWORD:-admin}"
+  
+  # Authorization - Logged in users can do anything
+  authorizationStrategy:
+    loggedInUsersCanDoAnything:
+      allowAnonymousRead: false
+
+  # Remoting Security
+  remotingSecurity:
+    enabled: true
+
+  # Global Node Properties
+  globalNodeProperties:
+    - envVars:
+        env:
+          - key: "DOCKER_REGISTRY"
+            value: "docker.io"
+          - key: "DOCKER_HUB_USERNAME"
+            value: "${DOCKER_HUB_USERNAME}"
+          - key: "JIRA_URL"
+            value: "${JIRA_URL:-https://danielmaz.atlassian.net}"
+          - key: "JIRA_PROJECT_KEY"
+            value: "${JIRA_PROJECT_KEY:-CICD}"
+          - key: "NOTIFICATION_EMAIL"
+            value: "${NOTIFICATION_EMAIL:-daniel.mazhbits@gmail.com}"
+          - key: "APP_SERVER_IP"
+            value: "${APP_SERVER_IP}"
+
+# -----------------------------------------------------------------------------
+# Credentials
+# -----------------------------------------------------------------------------
+credentials:
+  system:
+    domainCredentials:
+      - credentials:
+          # Docker Hub Credentials
+          - usernamePassword:
+              scope: GLOBAL
+              id: "docker-hub-credentials"
+              username: "${DOCKER_HUB_USERNAME}"
+              password: "${DOCKER_HUB_TOKEN}"
+              description: "Docker Hub credentials for image push"
+          
+          # GitHub Credentials
+          - usernamePassword:
+              scope: GLOBAL
+              id: "github-credentials"
+              username: "${GITHUB_USERNAME}"
+              password: "${GITHUB_TOKEN}"
+              description: "GitHub credentials for repository access"
+          
+          # JIRA Credentials
+          - usernamePassword:
+              scope: GLOBAL
+              id: "jira-credentials"
+              username: "${JIRA_EMAIL}"
+              password: "${JIRA_API_TOKEN}"
+              description: "JIRA credentials for issue creation"
+          
+          # AWS SSH Key
+          - basicSSHUserPrivateKey:
+              scope: GLOBAL
+              id: "aws-ssh-key"
+              username: "ec2-user"
+              description: "SSH key for AWS EC2 instances"
+              privateKeySource:
+                directEntry:
+                  privateKey: "${AWS_SSH_PRIVATE_KEY}"
+
+# -----------------------------------------------------------------------------
+# Unclassified Configuration
+# -----------------------------------------------------------------------------
+unclassified:
+  location:
+    url: "${JENKINS_URL:-http://localhost:8080/}"
+    adminAddress: "${NOTIFICATION_EMAIL:-admin@example.com}"
+  
+  # Email Extension
+  email-ext:
+    defaultRecipients: "${NOTIFICATION_EMAIL}"
+    defaultReplyTo: "no-reply@devops-testing-app.com"
+    defaultSubject: "[Jenkins] $PROJECT_NAME - Build #$BUILD_NUMBER - $BUILD_STATUS"
+    defaultBody: |
+      $PROJECT_NAME - Build #$BUILD_NUMBER - $BUILD_STATUS
+      
+      Check console output at $BUILD_URL to view the results.
+  
+  # GitHub Plugin
+  gitHubPluginConfig:
+    hookUrl: "${JENKINS_URL:-http://localhost:8080/}github-webhook/"
+  
+  # Global Pipeline Libraries (optional)
+  globalLibraries:
+    libraries: []
+
+# -----------------------------------------------------------------------------
+# Tool Configuration
+# -----------------------------------------------------------------------------
+tool:
+  git:
+    installations:
+      - name: "Default"
+        home: "git"
+  
+  # Python installations (if using pyenv plugin)
+  # python:
+  #   installations:
+  #     - name: "Python-3.9"
+  #       home: "/usr/bin/python3"
+
+# -----------------------------------------------------------------------------
+# Jobs Configuration (Job DSL)
+# -----------------------------------------------------------------------------
+jobs:
+  - script: |
+      // Main Pipeline Job
+      pipelineJob('devops-testing-app') {
+        displayName('DevOps Testing App - Main Pipeline')
+        description('''
+          Main CI/CD Pipeline for DevOps Testing Application
+          
+          Features:
+          - Unit, Integration, E2E Tests
+          - Code Coverage Reports
+          - Docker Build & Push
+          - AWS Deployment
+          - JIRA Integration
+        ''')
+        
+        definition {
+          cpsScm {
+            scm {
+              git {
+                remote {
+                  url('https://github.com/${GITHUB_USERNAME}/devops-ci-cd-exercise.git')
+                  credentials('github-credentials')
+                }
+                branches('*/main', '*/develop', '*/feature/*')
+              }
+            }
+            scriptPath('jenkins/Jenkinsfile')
+            lightweight(true)
+          }
+        }
+        
+        triggers {
+          githubPush()
+          pollSCM('H/5 * * * *')
+        }
+        
+        properties {
+          buildDiscarder {
+            strategy {
+              logRotator {
+                numToKeepStr('10')
+              }
+            }
+          }
+          
+          pipelineTriggers {
+            triggers {
+              githubPush()
+            }
+          }
+        }
+      }
+      
+      // Production Release Job
+      pipelineJob('devops-testing-app-production') {
+        displayName('DevOps Testing App - Production Release')
+        description('Production release pipeline with approval gates')
+        
+        definition {
+          cpsScm {
+            scm {
+              git {
+                remote {
+                  url('https://github.com/${GITHUB_USERNAME}/devops-ci-cd-exercise.git')
+                  credentials('github-credentials')
+                }
+                branches('*/main', '*/release/*')
+              }
+            }
+            scriptPath('jenkins/Jenkinsfile.prod')
+            lightweight(true)
+          }
+        }
+        
+        parameters {
+          booleanParam('SKIP_TESTS', false, 'Skip test execution')
+          booleanParam('RUN_PERFORMANCE_TESTS', true, 'Run performance tests')
+          stringParam('ROLLBACK_VERSION', '', 'Version to rollback to')
+        }
+        
+        properties {
+          buildDiscarder {
+            strategy {
+              logRotator {
+                numToKeepStr('5')
+              }
+            }
+          }
+        }
+      }

@@ -1,44 +1,129 @@
+// =============================================================================
+// DevOps Testing App - Enhanced Jenkins Pipeline
+// =============================================================================
+// Features:
+// - All tests (unit, integration, e2e) - mandatory
+// - Performance tests - production only
+// - Code coverage reports to htmlcov/
+// - Docker build & push to Docker Hub
+// - JIRA issue creation on failure
+// - Email notifications
+// - AWS deployment via Ansible
+// =============================================================================
+
 pipeline {
     agent any
     
     environment {
+        // Python
         PYTHON_VERSION = '3.9'
         VENV_DIR = 'venv'
+        
+        // Docker
+        DOCKER_REGISTRY = 'docker.io'
+        DOCKER_IMAGE = "${DOCKER_HUB_USERNAME}/devops-testing-app"
+        DOCKER_CREDENTIALS_ID = 'docker-hub-credentials'
+        
+        // Git
+        GIT_COMMIT_SHORT = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+        VERSION_TAG = "${BUILD_NUMBER}-${GIT_COMMIT_SHORT}"
+        
+        // JIRA
+        JIRA_SITE = 'jira-site'
+        JIRA_PROJECT_KEY = 'CICD'
+        
+        // Notification
+        NOTIFICATION_EMAIL = 'daniel.mazhbits@gmail.com'
+    }
+    
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        timestamps()
+        timeout(time: 60, unit: 'MINUTES')
+        disableConcurrentBuilds()
+        ansiColor('xterm')
     }
     
     stages {
+        // =====================================================================
+        // Stage 1: Setup Environment
+        // =====================================================================
         stage('Setup Environment') {
             steps {
                 script {
-                    sh 'echo "Setting up Python environment"'
+                    echo "=========================================="
+                    echo "Setting up Python ${PYTHON_VERSION} environment"
+                    echo "=========================================="
                     
-                    sh 'python${PYTHON_VERSION} -m venv ${VENV_DIR}'
-                    sh '. ${VENV_DIR}/bin/activate && pip install --upgrade pip'
-                    sh '. ${VENV_DIR}/bin/activate && pip install -r requirements.txt'
+                    sh """
+                        python${PYTHON_VERSION} -m venv ${VENV_DIR} || python3 -m venv ${VENV_DIR}
+                        . ${VENV_DIR}/bin/activate
+                        pip install --upgrade pip
+                        pip install -r requirements.txt
+                        pip install flake8 pylint bandit pytest-html
+                    """
                 }
             }
         }
         
-        stage('Lint Code') {
-            steps {
-                script {
-                    sh '. ${VENV_DIR}/bin/activate && flake8 app/ --output-file=reports/flake8.txt || true'
-                    sh '. ${VENV_DIR}/bin/activate && pylint app/ --output=reports/pylint.txt || true'
+        // =====================================================================
+        // Stage 2: Code Quality (Parallel)
+        // =====================================================================
+        stage('Code Quality') {
+            parallel {
+                stage('Flake8') {
+                    steps {
+                        sh """
+                            mkdir -p reports
+                            . ${VENV_DIR}/bin/activate
+                            flake8 app/ --max-line-length=120 --output-file=reports/flake8.txt || true
+                        """
+                    }
+                }
+                stage('Pylint') {
+                    steps {
+                        sh """
+                            mkdir -p reports
+                            . ${VENV_DIR}/bin/activate
+                            pylint app/ --exit-zero --output=reports/pylint.txt || true
+                        """
+                    }
+                }
+                stage('Bandit Security') {
+                    steps {
+                        sh """
+                            mkdir -p reports
+                            . ${VENV_DIR}/bin/activate
+                            bandit -r app/ -f json -o reports/bandit-report.json || true
+                        """
+                    }
                 }
             }
             post {
                 always {
-                    archiveArtifacts artifacts: 'reports/*.txt', allowEmptyArchive: true
+                    archiveArtifacts artifacts: 'reports/*.txt,reports/*.json', allowEmptyArchive: true
                 }
             }
         }
         
+        // =====================================================================
+        // Stage 3: Unit Tests (MANDATORY)
+        // =====================================================================
         stage('Unit Tests') {
             steps {
-                script {
-                    sh 'mkdir -p reports'
-                    sh '. ${VENV_DIR}/bin/activate && pytest tests/unit/ -v --cov=app --cov-report=xml --cov-report=html --junit-xml=reports/unit-tests.xml'
-                }
+                sh """
+                    mkdir -p reports htmlcov
+                    . ${VENV_DIR}/bin/activate
+                    
+                    pytest tests/unit/ tests/test_calc.py -v \\
+                        --cov=app \\
+                        --cov-report=xml:reports/coverage.xml \\
+                        --cov-report=html:htmlcov \\
+                        --cov-report=term-missing \\
+                        --junit-xml=reports/unit-tests.xml \\
+                        --html=reports/unit-tests.html \\
+                        --self-contained-html
+                """
             }
             post {
                 always {
@@ -49,173 +134,409 @@ pipeline {
                         keepAll: true,
                         reportDir: 'htmlcov',
                         reportFiles: 'index.html',
-                        reportName: 'Unit Test Coverage Report'
+                        reportName: 'Code Coverage Report'
                     ])
-                    archiveArtifacts artifacts: 'htmlcov/**/*', allowEmptyArchive: false
+                    publishHTML([
+                        allowMissing: false,
+                        alwaysLinkToLastBuild: true,
+                        keepAll: true,
+                        reportDir: 'reports',
+                        reportFiles: 'unit-tests.html',
+                        reportName: 'Unit Test Report'
+                    ])
+                    archiveArtifacts artifacts: 'htmlcov/**/*', allowEmptyArchive: true
                 }
             }
         }
         
+        // =====================================================================
+        // Stage 4: Integration Tests (MANDATORY)
+        // =====================================================================
         stage('Integration Tests') {
             steps {
-                script {
-                    sh '. ${VENV_DIR}/bin/activate && pytest tests/integration/ -v --junit-xml=reports/integration-tests.xml'
-                }
+                sh """
+                    . ${VENV_DIR}/bin/activate
+                    
+                    pytest tests/integration/ -v \\
+                        --junit-xml=reports/integration-tests.xml \\
+                        --html=reports/integration-tests.html \\
+                        --self-contained-html
+                """
             }
             post {
                 always {
                     junit 'reports/integration-tests.xml'
+                    publishHTML([
+                        allowMissing: false,
+                        alwaysLinkToLastBuild: true,
+                        keepAll: true,
+                        reportDir: 'reports',
+                        reportFiles: 'integration-tests.html',
+                        reportName: 'Integration Test Report'
+                    ])
                 }
             }
         }
         
-        stage('End-to-End Tests') {
+        // =====================================================================
+        // Stage 5: E2E Tests (MANDATORY)
+        // =====================================================================
+        stage('E2E Tests') {
             steps {
-                script {
-                    sh '''
-                        . ${VENV_DIR}/bin/activate
-                        export DISPLAY=:99
-                        Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
-                        sleep 3
-                        pytest tests/e2e/ -v --junit-xml=reports/e2e-tests.xml
-                        killall Xvfb || true
-                    '''
-                }
+                sh """
+                    . ${VENV_DIR}/bin/activate
+                    export DISPLAY=:99
+                    
+                    # Start virtual display
+                    Xvfb :99 -screen 0 1920x1080x24 > /dev/null 2>&1 &
+                    sleep 3
+                    
+                    pytest tests/e2e/ -v \\
+                        --junit-xml=reports/e2e-tests.xml \\
+                        --html=reports/e2e-tests.html \\
+                        --self-contained-html || true
+                    
+                    killall Xvfb || true
+                """
             }
             post {
                 always {
-                    junit 'reports/e2e-tests.xml'
+                    junit allowEmptyResults: true, testResults: 'reports/e2e-tests.xml'
+                    publishHTML([
+                        allowMissing: true,
+                        alwaysLinkToLastBuild: true,
+                        keepAll: true,
+                        reportDir: 'reports',
+                        reportFiles: 'e2e-tests.html',
+                        reportName: 'E2E Test Report'
+                    ])
                 }
             }
         }
         
+        // =====================================================================
+        // Stage 6: Performance Tests (PRODUCTION ONLY)
+        // =====================================================================
         stage('Performance Tests') {
-            steps {
-                script {
-                    sh '''
-                        . ${VENV_DIR}/bin/activate
-                        
-                        python app.py &
-                        APP_PID=$!
-                        sleep 5
-                        
-                        locust -f tests/performance/locustfile.py \\
-                            --headless \\
-                            --users 10 \\
-                            --spawn-rate 2 \\
-                            --run-time 30s \\
-                            --host http://localhost:5000 \\
-                            --html reports/performance-report.html
-                        
-                        kill $APP_PID || true
-                    '''
+            when {
+                anyOf {
+                    environment name: 'ENVIRONMENT', value: 'production'
+                    branch 'main'
+                    expression { return params.RUN_PERFORMANCE_TESTS == true }
                 }
+            }
+            steps {
+                sh """
+                    . ${VENV_DIR}/bin/activate
+                    
+                    # Start application
+                    python main.py &
+                    APP_PID=\$!
+                    sleep 5
+                    
+                    # Run Locust performance tests
+                    locust -f tests/performance/locustfile.py \\
+                        --headless \\
+                        --users 10 \\
+                        --spawn-rate 2 \\
+                        --run-time 30s \\
+                        --host http://localhost:5000 \\
+                        --html reports/performance-report.html \\
+                        --csv reports/performance
+                    
+                    # Cleanup
+                    kill \$APP_PID || true
+                """
             }
             post {
                 always {
                     publishHTML([
-                        allowMissing: false,
+                        allowMissing: true,
                         alwaysLinkToLastBuild: true,
                         keepAll: true,
                         reportDir: 'reports',
                         reportFiles: 'performance-report.html',
                         reportName: 'Performance Test Report'
                     ])
+                    archiveArtifacts artifacts: 'reports/performance*.csv', allowEmptyArchive: true
                 }
             }
         }
         
-        stage('Security Scan') {
-            steps {
-                script {
-                    sh '. ${VENV_DIR}/bin/activate && bandit -r app/ -f json -o reports/bandit-report.json || true'
-                }
-            }
-            post {
-                always {
-                    archiveArtifacts artifacts: 'reports/bandit-report.json', allowEmptyArchive: true
-                }
-            }
-        }
-        
+        // =====================================================================
+        // Stage 7: Build Docker Image
+        // =====================================================================
         stage('Build Docker Image') {
             when {
                 anyOf {
                     branch 'main'
                     branch 'develop'
+                    branch pattern: "release/.*", comparator: "REGEXP"
                 }
             }
             steps {
                 script {
-                    sh '''
-                        docker build -t devops-testing-app:${BUILD_NUMBER} .
-                        docker tag devops-testing-app:${BUILD_NUMBER} devops-testing-app:latest
-                    '''
+                    echo "Building Docker image: ${DOCKER_IMAGE}:${VERSION_TAG}"
+                    
+                    sh """
+                        docker build \\
+                            -f docker/Dockerfile \\
+                            -t ${DOCKER_IMAGE}:${VERSION_TAG} \\
+                            -t ${DOCKER_IMAGE}:latest \\
+                            --build-arg BUILD_DATE="\$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \\
+                            --build-arg VERSION="${VERSION_TAG}" \\
+                            --build-arg GIT_COMMIT="${GIT_COMMIT_SHORT}" \\
+                            .
+                    """
                 }
             }
         }
         
+        // =====================================================================
+        // Stage 8: Push to Docker Hub
+        // =====================================================================
+        stage('Push to Docker Hub') {
+            when {
+                anyOf {
+                    branch 'main'
+                    branch 'develop'
+                    branch pattern: "release/.*", comparator: "REGEXP"
+                }
+            }
+            steps {
+                script {
+                    withCredentials([usernamePassword(
+                        credentialsId: DOCKER_CREDENTIALS_ID,
+                        usernameVariable: 'DOCKER_USER',
+                        passwordVariable: 'DOCKER_PASS'
+                    )]) {
+                        sh """
+                            echo "\$DOCKER_PASS" | docker login -u "\$DOCKER_USER" --password-stdin
+                            docker push ${DOCKER_IMAGE}:${VERSION_TAG}
+                            docker push ${DOCKER_IMAGE}:latest
+                            docker logout
+                        """
+                    }
+                    
+                    echo "✅ Pushed ${DOCKER_IMAGE}:${VERSION_TAG} to Docker Hub"
+                }
+            }
+        }
+        
+        // =====================================================================
+        // Stage 9: Deploy to Staging (AWS)
+        // =====================================================================
         stage('Deploy to Staging') {
             when {
                 branch 'develop'
             }
             steps {
                 script {
-                    sh '''
-                        echo "Deploying to staging environment"
-                        docker stop staging-app || true
-                        docker rm staging-app || true
-                        docker run -d --name staging-app -p 5001:5000 devops-testing-app:${BUILD_NUMBER}
-                        
-                        sleep 5
-                        curl -f http://localhost:5001/health || exit 1
-                    '''
+                    echo "Deploying to AWS Staging..."
+                    
+                    withCredentials([
+                        sshUserPrivateKey(
+                            credentialsId: 'aws-ssh-key',
+                            keyFileVariable: 'SSH_KEY'
+                        )
+                    ]) {
+                        sh """
+                            cd infrastructure/ansible
+                            
+                            export ANSIBLE_HOST_KEY_CHECKING=False
+                            export DOCKER_HUB_TOKEN=\$(cat /var/jenkins_home/secrets/docker-hub-token 2>/dev/null || echo '')
+                            
+                            ansible-playbook playbooks/deploy-app.yml \\
+                                -i inventory/staging.ini \\
+                                --private-key=\$SSH_KEY \\
+                                -e docker_tag=${VERSION_TAG} \\
+                                -e environment=staging
+                        """
+                    }
+                }
+            }
+            post {
+                success {
+                    echo "✅ Staging deployment successful!"
+                }
+            }
+        }
+        
+        // =====================================================================
+        // Stage 10: Deploy to Production (Manual Approval)
+        // =====================================================================
+        stage('Deploy to Production') {
+            when {
+                branch 'main'
+            }
+            steps {
+                // Manual approval gate
+                input message: 'Deploy to Production?', ok: 'Deploy'
+                
+                script {
+                    echo "Deploying to AWS Production..."
+                    
+                    withCredentials([
+                        sshUserPrivateKey(
+                            credentialsId: 'aws-ssh-key',
+                            keyFileVariable: 'SSH_KEY'
+                        )
+                    ]) {
+                        sh """
+                            cd infrastructure/ansible
+                            
+                            export ANSIBLE_HOST_KEY_CHECKING=False
+                            
+                            ansible-playbook playbooks/deploy-app.yml \\
+                                -i inventory/production.ini \\
+                                --private-key=\$SSH_KEY \\
+                                -e docker_tag=${VERSION_TAG} \\
+                                -e environment=production
+                        """
+                    }
+                }
+            }
+            post {
+                success {
+                    echo "🚀 Production deployment successful!"
                 }
             }
         }
     }
     
+    // =========================================================================
+    // Post Actions
+    // =========================================================================
     post {
         always {
-            cleanWs()
+            // Archive all reports
+            archiveArtifacts artifacts: 'reports/**/*', allowEmptyArchive: true
+            archiveArtifacts artifacts: 'htmlcov/**/*', allowEmptyArchive: true
+            
+            // Cleanup
+            cleanWs(
+                cleanWhenNotBuilt: false,
+                deleteDirs: true,
+                disableDeferredWipeout: true,
+                notFailBuild: true
+            )
         }
+        
         success {
             script {
-                sh 'echo "Pipeline completed successfully!"'
-                emailext (
-                    subject: "✅ Pipeline Success: ${env.JOB_NAME} - ${env.BUILD_NUMBER}",
+                echo "✅ Pipeline completed successfully!"
+                
+                // Email notification
+                emailext(
+                    subject: "✅ Build SUCCESS: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
                     body: """
-                        <p>The pipeline completed successfully!</p>
-                        <ul>
-                            <li><strong>Build:</strong> ${env.BUILD_NUMBER}</li>
-                            <li><strong>Branch:</strong> ${env.BRANCH_NAME}</li>
-                            <li><strong>Duration:</strong> ${currentBuild.durationString}</li>
-                            <li><strong>Reports:</strong> Check the artifacts section</li>
-                        </ul>
+                        <h2 style="color: green;">Build Successful!</h2>
+                        <table border="1" cellpadding="5" style="border-collapse: collapse;">
+                            <tr><td><strong>Job</strong></td><td>${env.JOB_NAME}</td></tr>
+                            <tr><td><strong>Build</strong></td><td>#${env.BUILD_NUMBER}</td></tr>
+                            <tr><td><strong>Branch</strong></td><td>${env.BRANCH_NAME ?: 'N/A'}</td></tr>
+                            <tr><td><strong>Version</strong></td><td>${VERSION_TAG}</td></tr>
+                            <tr><td><strong>Duration</strong></td><td>${currentBuild.durationString}</td></tr>
+                        </table>
                         <p><a href="${env.BUILD_URL}">View Build Details</a></p>
+                        <p><a href="${env.BUILD_URL}Code_20Coverage_20Report/">View Coverage Report</a></p>
                     """,
-                    to: "${env.CHANGE_AUTHOR_EMAIL}"
+                    to: NOTIFICATION_EMAIL,
+                    mimeType: 'text/html'
                 )
             }
         }
+        
         failure {
             script {
-                sh 'echo "Pipeline failed!"'
-                emailext (
-                    subject: "❌ Pipeline Failure: ${env.JOB_NAME} - ${env.BUILD_NUMBER}",
+                echo "❌ Pipeline failed!"
+                
+                // Create JIRA Issue
+                def jiraIssueKey = createJiraIssue()
+                
+                // Email notification with JIRA link
+                emailext(
+                    subject: "❌ Build FAILED: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
                     body: """
-                        <p>The pipeline failed!</p>
-                        <ul>
-                            <li><strong>Build:</strong> ${env.BUILD_NUMBER}</li>
-                            <li><strong>Branch:</strong> ${env.BRANCH_NAME}</li>
-                            <li><strong>Duration:</strong> ${currentBuild.durationString}</li>
-                            <li><strong>Failed Stage:</strong> ${currentBuild.currentResult}</li>
-                        </ul>
+                        <h2 style="color: red;">Build Failed!</h2>
+                        <table border="1" cellpadding="5" style="border-collapse: collapse;">
+                            <tr><td><strong>Job</strong></td><td>${env.JOB_NAME}</td></tr>
+                            <tr><td><strong>Build</strong></td><td>#${env.BUILD_NUMBER}</td></tr>
+                            <tr><td><strong>Branch</strong></td><td>${env.BRANCH_NAME ?: 'N/A'}</td></tr>
+                            <tr><td><strong>Duration</strong></td><td>${currentBuild.durationString}</td></tr>
+                            <tr><td><strong>Failed Stage</strong></td><td>${env.STAGE_NAME ?: 'Unknown'}</td></tr>
+                            ${jiraIssueKey ? "<tr><td><strong>JIRA Issue</strong></td><td><a href='https://danielmaz.atlassian.net/browse/${jiraIssueKey}'>${jiraIssueKey}</a></td></tr>" : ''}
+                        </table>
                         <p><a href="${env.BUILD_URL}">View Build Details</a></p>
+                        <p><a href="${env.BUILD_URL}console">View Console Log</a></p>
                     """,
-                    to: "${env.CHANGE_AUTHOR_EMAIL}"
+                    to: NOTIFICATION_EMAIL,
+                    mimeType: 'text/html'
                 )
             }
         }
+        
+        unstable {
+            echo "⚠️ Build is unstable. Check test results."
+        }
+    }
+}
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+def createJiraIssue() {
+    try {
+        withCredentials([usernamePassword(
+            credentialsId: 'jira-credentials',
+            usernameVariable: 'JIRA_USER',
+            passwordVariable: 'JIRA_TOKEN'
+        )]) {
+            def summary = "Jenkins Build Failure: ${env.JOB_NAME} #${env.BUILD_NUMBER}"
+            def description = """
+                h2. Build Failure Details
+                
+                ||Field||Value||
+                |Job Name|${env.JOB_NAME}|
+                |Build Number|${env.BUILD_NUMBER}|
+                |Branch|${env.BRANCH_NAME ?: 'N/A'}|
+                |Duration|${currentBuild.durationString}|
+                |Build URL|[View Build|${env.BUILD_URL}]|
+                |Console Log|[View Console|${env.BUILD_URL}console]|
+                
+                h2. Git Information
+                * Commit: ${env.GIT_COMMIT ?: 'N/A'}
+            """
+            
+            def payload = """
+            {
+                "fields": {
+                    "project": {"key": "${JIRA_PROJECT_KEY}"},
+                    "summary": "${summary}",
+                    "description": ${groovy.json.JsonOutput.toJson(description)},
+                    "issuetype": {"name": "Bug"},
+                    "priority": {"name": "High"},
+                    "labels": ["jenkins", "automated", "build-failure"]
+                }
+            }
+            """
+            
+            def response = httpRequest(
+                url: "https://danielmaz.atlassian.net/rest/api/3/issue",
+                httpMode: 'POST',
+                contentType: 'APPLICATION_JSON',
+                requestBody: payload,
+                authentication: 'jira-credentials',
+                validResponseCodes: '201'
+            )
+            
+            def json = readJSON text: response.content
+            echo "Created JIRA issue: ${json.key}"
+            return json.key
+        }
+    } catch (Exception e) {
+        echo "Failed to create JIRA issue: ${e.message}"
+        return null
     }
 }

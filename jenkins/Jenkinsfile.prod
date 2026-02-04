@@ -1,0 +1,363 @@
+// =============================================================================
+// DevOps Testing App - Production Release Pipeline
+// =============================================================================
+// Triggered only for release branches and tags
+// Includes additional approval gates and rollback capability
+// =============================================================================
+
+pipeline {
+    agent any
+    
+    environment {
+        DOCKER_IMAGE = "${DOCKER_HUB_USERNAME}/devops-testing-app"
+        ENVIRONMENT = 'production'
+        GIT_COMMIT_SHORT = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+        VERSION_TAG = "${env.TAG_NAME ?: BUILD_NUMBER}-${GIT_COMMIT_SHORT}"
+    }
+    
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '5'))
+        timestamps()
+        timeout(time: 90, unit: 'MINUTES')
+        ansiColor('xterm')
+    }
+    
+    parameters {
+        booleanParam(
+            name: 'SKIP_TESTS',
+            defaultValue: false,
+            description: 'Skip test execution (use with caution!)'
+        )
+        booleanParam(
+            name: 'RUN_PERFORMANCE_TESTS',
+            defaultValue: true,
+            description: 'Run performance tests'
+        )
+        string(
+            name: 'ROLLBACK_VERSION',
+            defaultValue: '',
+            description: 'Version to rollback to (leave empty for normal deployment)'
+        )
+    }
+    
+    stages {
+        // =====================================================================
+        // Validate Release
+        // =====================================================================
+        stage('Validate Release') {
+            steps {
+                script {
+                    if (!env.TAG_NAME && env.BRANCH_NAME != 'main' && !env.BRANCH_NAME?.startsWith('release/')) {
+                        error "Production pipeline requires a git tag, main branch, or release/* branch"
+                    }
+                    
+                    echo """
+                    ============================================
+                    Production Release Pipeline
+                    ============================================
+                    Version: ${VERSION_TAG}
+                    Branch: ${env.BRANCH_NAME ?: 'N/A'}
+                    Tag: ${env.TAG_NAME ?: 'N/A'}
+                    Rollback: ${params.ROLLBACK_VERSION ?: 'None'}
+                    ============================================
+                    """
+                }
+            }
+        }
+        
+        // =====================================================================
+        // Rollback (if requested)
+        // =====================================================================
+        stage('Rollback') {
+            when {
+                expression { return params.ROLLBACK_VERSION?.trim() }
+            }
+            steps {
+                script {
+                    input message: """
+                        ⚠️ ROLLBACK REQUESTED
+                        
+                        Rolling back to version: ${params.ROLLBACK_VERSION}
+                        
+                        This will:
+                        1. Stop current production containers
+                        2. Deploy version ${params.ROLLBACK_VERSION}
+                        3. Verify health checks
+                        
+                        Proceed with rollback?
+                    """, ok: 'Rollback'
+                    
+                    withCredentials([
+                        sshUserPrivateKey(
+                            credentialsId: 'aws-ssh-key',
+                            keyFileVariable: 'SSH_KEY'
+                        )
+                    ]) {
+                        sh """
+                            cd infrastructure/ansible
+                            
+                            ansible-playbook playbooks/rollback.yml \\
+                                -i inventory/production.ini \\
+                                --private-key=\$SSH_KEY \\
+                                -e rollback_tag=${params.ROLLBACK_VERSION}
+                        """
+                    }
+                    
+                    echo "✅ Rollback to ${params.ROLLBACK_VERSION} completed!"
+                }
+            }
+        }
+        
+        // =====================================================================
+        // Run Full Test Suite
+        // =====================================================================
+        stage('Run Tests') {
+            when {
+                expression { return !params.SKIP_TESTS && !params.ROLLBACK_VERSION?.trim() }
+            }
+            steps {
+                script {
+                    // Trigger the main pipeline and wait for it
+                    build job: 'devops-testing-app',
+                          parameters: [
+                              string(name: 'BRANCH', value: env.BRANCH_NAME ?: 'main'),
+                              booleanParam(name: 'RUN_PERFORMANCE_TESTS', value: params.RUN_PERFORMANCE_TESTS)
+                          ],
+                          wait: true,
+                          propagate: true
+                }
+            }
+        }
+        
+        // =====================================================================
+        // Production Approval
+        // =====================================================================
+        stage('Production Approval') {
+            when {
+                expression { return !params.ROLLBACK_VERSION?.trim() }
+            }
+            steps {
+                script {
+                    def approvers = input(
+                        message: '''
+                            ============================================
+                            PRODUCTION DEPLOYMENT CHECKLIST
+                            ============================================
+                            
+                            ☑️ All tests passed
+                            ☑️ Code review completed
+                            ☑️ Release notes prepared
+                            ☑️ Rollback plan ready
+                            ☑️ Monitoring alerts configured
+                            
+                            Proceed with production deployment?
+                        ''',
+                        ok: 'Deploy to Production',
+                        submitter: 'admin,release-managers',
+                        submitterParameter: 'APPROVED_BY'
+                    )
+                    
+                    echo "Deployment approved by: ${approvers}"
+                }
+            }
+        }
+        
+        // =====================================================================
+        // Deploy to Production
+        // =====================================================================
+        stage('Deploy to Production') {
+            when {
+                expression { return !params.ROLLBACK_VERSION?.trim() }
+            }
+            steps {
+                script {
+                    echo "🚀 Deploying ${VERSION_TAG} to Production..."
+                    
+                    withCredentials([
+                        sshUserPrivateKey(
+                            credentialsId: 'aws-ssh-key',
+                            keyFileVariable: 'SSH_KEY'
+                        )
+                    ]) {
+                        sh """
+                            cd infrastructure/ansible
+                            
+                            export ANSIBLE_HOST_KEY_CHECKING=False
+                            
+                            ansible-playbook playbooks/deploy-app.yml \\
+                                -i inventory/production.ini \\
+                                --private-key=\$SSH_KEY \\
+                                -e docker_tag=${VERSION_TAG} \\
+                                -e environment=production
+                        """
+                    }
+                }
+            }
+        }
+        
+        // =====================================================================
+        // Smoke Tests
+        // =====================================================================
+        stage('Smoke Tests') {
+            when {
+                expression { return !params.ROLLBACK_VERSION?.trim() }
+            }
+            steps {
+                script {
+                    echo "Running production smoke tests..."
+                    
+                    // Wait for deployment to stabilize
+                    sleep(time: 30, unit: 'SECONDS')
+                    
+                    // Health check
+                    sh """
+                        for i in 1 2 3 4 5; do
+                            if curl -sf http://\${PRODUCTION_APP_IP}/health; then
+                                echo "Health check passed!"
+                                exit 0
+                            fi
+                            echo "Attempt \$i failed, retrying..."
+                            sleep 10
+                        done
+                        echo "Health check failed after 5 attempts"
+                        exit 1
+                    """
+                }
+            }
+            post {
+                failure {
+                    script {
+                        echo "❌ Smoke tests failed! Initiating automatic rollback..."
+                        
+                        // Get previous version
+                        def previousVersion = sh(
+                            script: "cat infrastructure/ansible/inventory/production-previous-version.txt 2>/dev/null || echo 'latest'",
+                            returnStdout: true
+                        ).trim()
+                        
+                        withCredentials([
+                            sshUserPrivateKey(
+                                credentialsId: 'aws-ssh-key',
+                                keyFileVariable: 'SSH_KEY'
+                            )
+                        ]) {
+                            sh """
+                                cd infrastructure/ansible
+                                
+                                ansible-playbook playbooks/rollback.yml \\
+                                    -i inventory/production.ini \\
+                                    --private-key=\$SSH_KEY \\
+                                    -e rollback_tag=${previousVersion}
+                            """
+                        }
+                    }
+                }
+            }
+        }
+        
+        // =====================================================================
+        // Tag Release
+        // =====================================================================
+        stage('Tag Release') {
+            when {
+                allOf {
+                    expression { return !env.TAG_NAME }
+                    expression { return !params.ROLLBACK_VERSION?.trim() }
+                }
+            }
+            steps {
+                script {
+                    withCredentials([usernamePassword(
+                        credentialsId: 'github-credentials',
+                        usernameVariable: 'GIT_USER',
+                        passwordVariable: 'GIT_TOKEN'
+                    )]) {
+                        sh """
+                            git config user.email "jenkins@devops-testing-app.com"
+                            git config user.name "Jenkins CI"
+                            
+                            git tag -a v${VERSION_TAG} -m "Release v${VERSION_TAG}"
+                            git push https://\${GIT_USER}:\${GIT_TOKEN}@github.com/danielmazh/devops-ci-cd-exercise.git v${VERSION_TAG}
+                        """
+                    }
+                    
+                    echo "✅ Tagged release: v${VERSION_TAG}"
+                }
+            }
+        }
+    }
+    
+    // =========================================================================
+    // Post Actions
+    // =========================================================================
+    post {
+        success {
+            script {
+                def action = params.ROLLBACK_VERSION?.trim() ? 'Rollback' : 'Deployment'
+                
+                emailext(
+                    subject: "🚀 Production ${action} SUCCESS: v${VERSION_TAG}",
+                    body: """
+                        <h2 style="color: green;">Production ${action} Successful!</h2>
+                        <table border="1" cellpadding="5">
+                            <tr><td><strong>Version</strong></td><td>${VERSION_TAG}</td></tr>
+                            <tr><td><strong>Environment</strong></td><td>Production</td></tr>
+                            <tr><td><strong>Duration</strong></td><td>${currentBuild.durationString}</td></tr>
+                        </table>
+                        <p><a href="${env.BUILD_URL}">View Build Details</a></p>
+                    """,
+                    to: 'daniel.mazhbits@gmail.com',
+                    mimeType: 'text/html'
+                )
+            }
+        }
+        
+        failure {
+            script {
+                // Create CRITICAL JIRA issue for production failures
+                withCredentials([usernamePassword(
+                    credentialsId: 'jira-credentials',
+                    usernameVariable: 'JIRA_USER',
+                    passwordVariable: 'JIRA_TOKEN'
+                )]) {
+                    def payload = """
+                    {
+                        "fields": {
+                            "project": {"key": "CICD"},
+                            "summary": "CRITICAL: Production deployment failed - v${VERSION_TAG}",
+                            "description": "Production deployment failed. Immediate attention required.\\n\\nBuild: ${env.BUILD_URL}",
+                            "issuetype": {"name": "Bug"},
+                            "priority": {"name": "Highest"},
+                            "labels": ["production", "critical", "deployment-failure"]
+                        }
+                    }
+                    """
+                    
+                    try {
+                        httpRequest(
+                            url: "https://danielmaz.atlassian.net/rest/api/3/issue",
+                            httpMode: 'POST',
+                            contentType: 'APPLICATION_JSON',
+                            requestBody: payload,
+                            authentication: 'jira-credentials',
+                            validResponseCodes: '201'
+                        )
+                    } catch (Exception e) {
+                        echo "Failed to create JIRA issue: ${e.message}"
+                    }
+                }
+                
+                emailext(
+                    subject: "🔴 CRITICAL: Production Deployment FAILED - v${VERSION_TAG}",
+                    body: """
+                        <h2 style="color: red;">Production Deployment Failed!</h2>
+                        <p><strong>Immediate attention required!</strong></p>
+                        <p><a href="${env.BUILD_URL}">View Build Details</a></p>
+                    """,
+                    to: 'daniel.mazhbits@gmail.com',
+                    mimeType: 'text/html'
+                )
+            }
+        }
+    }
+}
