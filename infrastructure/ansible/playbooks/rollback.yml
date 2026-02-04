@@ -1,0 +1,129 @@
+---
+# =============================================================================
+# DevOps Testing App - Rollback Playbook
+# =============================================================================
+# Rolls back to the previous application version
+# Usage: ansible-playbook playbooks/rollback.yml -i inventory/staging.ini
+# =============================================================================
+
+- name: Rollback Application
+  hosts: app
+  become: yes
+  gather_facts: yes
+
+  vars:
+    rollback_tag: ""  # Optional: specify exact tag to rollback to
+
+  tasks:
+    # -------------------------------------------------------------------------
+    # Determine Rollback Version
+    # -------------------------------------------------------------------------
+    - name: Check for previous image record
+      stat:
+        path: "{{ app_install_dir }}/backup/previous-image.txt"
+      register: previous_image_file
+
+    - name: Read previous image
+      slurp:
+        src: "{{ app_install_dir }}/backup/previous-image.txt"
+      register: previous_image_content
+      when: 
+        - previous_image_file.stat.exists
+        - rollback_tag | length == 0
+
+    - name: Set rollback image
+      set_fact:
+        rollback_image: "{{ rollback_tag if rollback_tag | length > 0 else (previous_image_content.content | b64decode | trim) }}"
+
+    - name: Verify rollback image is available
+      fail:
+        msg: "No previous image found for rollback. Please specify rollback_tag manually."
+      when: rollback_image == "none" or rollback_image | length == 0
+
+    - name: Display rollback info
+      debug:
+        msg: |
+          ============================================
+          Starting Rollback
+          Target Image: {{ rollback_image }}
+          Environment: {{ environment }}
+          ============================================
+
+    # -------------------------------------------------------------------------
+    # Get Current State (for logging)
+    # -------------------------------------------------------------------------
+    - name: Get current container image
+      command: docker inspect devops-app-{{ environment }} --format '{{ '{{' }}.Config.Image{{ '}}' }}'
+      register: current_image
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Log current image before rollback
+      debug:
+        msg: "Rolling back from: {{ current_image.stdout | default('unknown') }}"
+      when: current_image is succeeded
+
+    # -------------------------------------------------------------------------
+    # Perform Rollback
+    # -------------------------------------------------------------------------
+    - name: Stop current application
+      community.docker.docker_compose_v2:
+        project_src: "{{ app_install_dir }}"
+        state: absent
+      ignore_errors: yes
+
+    - name: Extract tag from rollback image
+      set_fact:
+        rollback_tag_only: "{{ rollback_image.split(':')[-1] }}"
+
+    - name: Update .env with rollback tag
+      lineinfile:
+        path: "{{ app_install_dir }}/.env"
+        regexp: "^IMAGE_TAG="
+        line: "IMAGE_TAG={{ rollback_tag_only }}"
+
+    - name: Update docker-compose.yml with rollback tag
+      template:
+        src: ../roles/docker-app/templates/docker-compose.yml.j2
+        dest: "{{ app_install_dir }}/docker-compose.yml"
+        owner: ec2-user
+        group: ec2-user
+        mode: '0644'
+      vars:
+        docker_tag: "{{ rollback_tag_only }}"
+
+    - name: Start application with rollback image
+      community.docker.docker_compose_v2:
+        project_src: "{{ app_install_dir }}"
+        state: present
+      register: rollback_result
+
+    # -------------------------------------------------------------------------
+    # Verify Rollback
+    # -------------------------------------------------------------------------
+    - name: Wait for application to be healthy
+      uri:
+        url: "http://localhost:{{ app_port }}/health"
+        method: GET
+        status_code: 200
+      register: health_check
+      until: health_check.status == 200
+      retries: 12
+      delay: 5
+
+    - name: Get new container status
+      command: docker ps --filter "name=devops-app" --format "{{ '{{' }}.Image{{ '}}' }} - {{ '{{' }}.Status{{ '}}' }}"
+      register: new_container_status
+      changed_when: false
+
+  post_tasks:
+    - name: Rollback complete
+      debug:
+        msg: |
+          ============================================
+          Rollback Successful!
+          Previous Image: {{ current_image.stdout | default('unknown') }}
+          Current Image: {{ rollback_image }}
+          Container: {{ new_container_status.stdout }}
+          Health: {{ health_check.json.status }}
+          ============================================

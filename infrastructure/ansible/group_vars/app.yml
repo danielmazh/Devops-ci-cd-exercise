@@ -1,0 +1,41 @@
+# =============================================================================
+# DevOps Testing App - Ansible Group Variables (App Server)
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Application Configuration
+# -----------------------------------------------------------------------------
+app_port: 80
+app_internal_port: 5000
+app_container_name: "devops-app-{{ environment }}"
+
+# Flask settings
+flask_env: "{{ environment }}"
+flask_secret_key: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
+
+# -----------------------------------------------------------------------------
+# Docker Compose Settings
+# -----------------------------------------------------------------------------
+docker_compose_version: "3.9"
+
+# Resource limits
+app_cpu_limit: "1.0"
+app_memory_limit: "512M"
+app_cpu_reservation: "0.25"
+app_memory_reservation: "128M"
+
+# -----------------------------------------------------------------------------
+# Health Check
+# -----------------------------------------------------------------------------
+health_check_endpoint: "/health"
+health_check_interval: 30
+health_check_timeout: 10
+health_check_retries: 3
+health_check_start_period: 30
+
+# -----------------------------------------------------------------------------
+# Logging
+# -----------------------------------------------------------------------------
+log_driver: "json-file"
+log_max_size: "10m"
+log_max_file: "5"

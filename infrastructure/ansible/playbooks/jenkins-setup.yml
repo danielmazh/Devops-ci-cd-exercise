@@ -1,0 +1,172 @@
+---
+# =============================================================================
+# DevOps Testing App - Jenkins Setup Playbook
+# =============================================================================
+# Installs and configures Jenkins on EC2 instance
+# Usage: ansible-playbook playbooks/jenkins-setup.yml -i inventory/staging.ini
+# =============================================================================
+
+- name: Setup Jenkins Server
+  hosts: jenkins
+  become: yes
+  gather_facts: yes
+
+  vars:
+    jenkins_home: "/opt/jenkins/data"
+    jenkins_casc_dir: "/opt/jenkins/casc"
+    
+  pre_tasks:
+    - name: Wait for system to be ready
+      wait_for_connection:
+        timeout: 300
+
+    - name: Gather facts
+      setup:
+
+  tasks:
+    # -------------------------------------------------------------------------
+    # Verify Docker Installation
+    # -------------------------------------------------------------------------
+    - name: Verify Docker is installed
+      command: docker --version
+      register: docker_version
+      changed_when: false
+
+    - name: Display Docker version
+      debug:
+        msg: "Docker version: {{ docker_version.stdout }}"
+
+    - name: Ensure Docker service is running
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+
+    # -------------------------------------------------------------------------
+    # Create Jenkins Directories
+    # -------------------------------------------------------------------------
+    - name: Create Jenkins directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: 1000
+        group: 1000
+        mode: '0755'
+      loop:
+        - "{{ jenkins_home }}"
+        - "{{ jenkins_casc_dir }}"
+        - "/opt/jenkins/backup"
+
+    # -------------------------------------------------------------------------
+    # Copy Jenkins Configuration as Code
+    # -------------------------------------------------------------------------
+    - name: Create Jenkins CasC configuration
+      template:
+        src: ../roles/jenkins/templates/jenkins-casc.yaml.j2
+        dest: "{{ jenkins_casc_dir }}/jenkins.yaml"
+        owner: 1000
+        group: 1000
+        mode: '0644'
+      notify: Restart Jenkins
+
+    # -------------------------------------------------------------------------
+    # Copy Plugins List
+    # -------------------------------------------------------------------------
+    - name: Copy Jenkins plugins list
+      copy:
+        src: ../roles/jenkins/files/plugins.txt
+        dest: "/opt/jenkins/plugins.txt"
+        owner: 1000
+        group: 1000
+        mode: '0644'
+
+    # -------------------------------------------------------------------------
+    # Create Docker Compose File
+    # -------------------------------------------------------------------------
+    - name: Create Jenkins docker-compose.yml
+      template:
+        src: ../roles/jenkins/templates/docker-compose.yml.j2
+        dest: "/opt/jenkins/docker-compose.yml"
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Restart Jenkins
+
+    # -------------------------------------------------------------------------
+    # Login to Docker Hub
+    # -------------------------------------------------------------------------
+    - name: Login to Docker Hub
+      docker_login:
+        username: "{{ docker_hub_username }}"
+        password: "{{ docker_hub_token }}"
+        registry_url: "https://index.docker.io/v1/"
+      when: docker_hub_token | length > 0
+
+    # -------------------------------------------------------------------------
+    # Start Jenkins Container
+    # -------------------------------------------------------------------------
+    - name: Pull Jenkins image
+      docker_image:
+        name: jenkins/jenkins:lts-jdk17
+        source: pull
+
+    - name: Start Jenkins with Docker Compose
+      community.docker.docker_compose_v2:
+        project_src: /opt/jenkins
+        state: present
+      register: jenkins_compose_result
+
+    - name: Display Jenkins compose result
+      debug:
+        var: jenkins_compose_result
+
+    # -------------------------------------------------------------------------
+    # Wait for Jenkins to be Ready
+    # -------------------------------------------------------------------------
+    - name: Wait for Jenkins to start
+      uri:
+        url: "http://localhost:8080/login"
+        method: GET
+        status_code: 200
+      register: jenkins_health
+      until: jenkins_health.status == 200
+      retries: 30
+      delay: 10
+
+    # -------------------------------------------------------------------------
+    # Get Initial Admin Password (if CasC didn't set it)
+    # -------------------------------------------------------------------------
+    - name: Check if initial admin password exists
+      stat:
+        path: "{{ jenkins_home }}/secrets/initialAdminPassword"
+      register: initial_password_file
+
+    - name: Get Jenkins initial admin password
+      command: cat {{ jenkins_home }}/secrets/initialAdminPassword
+      register: jenkins_initial_password
+      when: initial_password_file.stat.exists
+      changed_when: false
+
+    - name: Display Jenkins credentials
+      debug:
+        msg: |
+          ============================================
+          Jenkins is ready!
+          URL: http://{{ ansible_host }}:8080
+          User: {{ jenkins_admin_user }}
+          Password: {{ jenkins_admin_password }}
+          {% if jenkins_initial_password is defined and jenkins_initial_password.stdout is defined %}
+          Initial Password: {{ jenkins_initial_password.stdout }}
+          {% endif %}
+          ============================================
+
+  handlers:
+    - name: Restart Jenkins
+      community.docker.docker_compose_v2:
+        project_src: /opt/jenkins
+        state: restarted
+
+  post_tasks:
+    - name: Jenkins setup complete
+      debug:
+        msg: "Jenkins setup completed successfully on {{ ansible_host }}"

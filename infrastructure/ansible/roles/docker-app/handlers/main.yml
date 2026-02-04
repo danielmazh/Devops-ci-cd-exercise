@@ -1,0 +1,19 @@
+---
+# =============================================================================
+# DevOps Testing App - Docker App Role Handlers
+# =============================================================================
+
+- name: Restart app container
+  community.docker.docker_compose_v2:
+    project_src: "{{ app_install_dir }}"
+    state: restarted
+
+- name: Stop app container
+  community.docker.docker_compose_v2:
+    project_src: "{{ app_install_dir }}"
+    state: absent
+
+- name: Start app container
+  community.docker.docker_compose_v2:
+    project_src: "{{ app_install_dir }}"
+    state: present

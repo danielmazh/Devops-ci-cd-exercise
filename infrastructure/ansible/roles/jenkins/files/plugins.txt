@@ -1,0 +1,56 @@
+# =============================================================================
+# Jenkins Plugins List
+# =============================================================================
+
+# Core Pipeline
+workflow-aggregator
+pipeline-stage-view
+pipeline-graph-view
+pipeline-build-step
+
+# Git Integration
+git
+github
+github-branch-source
+
+# Docker
+docker-workflow
+docker-plugin
+
+# Credentials
+credentials
+credentials-binding
+plain-credentials
+
+# Build Tools
+timestamper
+ansicolor
+build-timeout
+
+# Test & Coverage
+junit
+cobertura
+htmlpublisher
+
+# Notifications
+email-ext
+mailer
+
+# Configuration as Code
+configuration-as-code
+job-dsl
+
+# Utilities
+ws-cleanup
+rebuild
+build-name-setter
+
+# HTTP Requests (for JIRA/Slack)
+http_request
+
+# SSH
+ssh-agent
+ssh-slaves
+
+# AWS
+aws-credentials

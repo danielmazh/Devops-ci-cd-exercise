@@ -1,0 +1,19 @@
+---
+# =============================================================================
+# DevOps Testing App - Jenkins Role Handlers
+# =============================================================================
+
+- name: Restart Jenkins container
+  community.docker.docker_compose_v2:
+    project_src: /opt/jenkins
+    state: restarted
+
+- name: Stop Jenkins container
+  community.docker.docker_compose_v2:
+    project_src: /opt/jenkins
+    state: absent
+
+- name: Start Jenkins container
+  community.docker.docker_compose_v2:
+    project_src: /opt/jenkins
+    state: present

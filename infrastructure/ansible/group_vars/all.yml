@@ -1,0 +1,53 @@
+# =============================================================================
+# DevOps Testing App - Ansible Group Variables (All Hosts)
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Project Settings
+# -----------------------------------------------------------------------------
+project_name: "devops-testing-app"
+environment: "staging"
+
+# -----------------------------------------------------------------------------
+# Docker Configuration
+# -----------------------------------------------------------------------------
+docker_registry: "docker.io"
+docker_hub_username: "danielmazh"
+docker_hub_token: "{{ lookup('env', 'DOCKER_HUB_TOKEN') }}"  # Set via environment variable
+docker_image: "{{ docker_hub_username }}/devops-testing-app"
+docker_tag: "latest"
+
+# -----------------------------------------------------------------------------
+# GitHub Configuration
+# -----------------------------------------------------------------------------
+github_username: "danielmazh"
+github_token: "{{ lookup('env', 'GITHUB_TOKEN') | default('', true) }}"
+github_repo: "devops-ci-cd-exercise"
+github_branch: "main"
+
+# -----------------------------------------------------------------------------
+# JIRA Configuration
+# -----------------------------------------------------------------------------
+jira_url: "https://danielmaz.atlassian.net"
+jira_email: "daniel.mazhbits@gmail.com"
+jira_api_token: "{{ lookup('env', 'JIRA_API_TOKEN') | default('', true) }}"
+jira_project_key: "CICD"
+
+# -----------------------------------------------------------------------------
+# Notification Settings
+# -----------------------------------------------------------------------------
+notification_email: "daniel.mazhbits@gmail.com"
+
+# -----------------------------------------------------------------------------
+# SSH Settings
+# -----------------------------------------------------------------------------
+ansible_user: "ec2-user"
+ansible_become: true
+ansible_ssh_private_key_file: "/Users/danielmazmazhbits/keys/daniel-devops.pem"
+ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+
+# -----------------------------------------------------------------------------
+# Paths
+# -----------------------------------------------------------------------------
+app_install_dir: "/opt/devops-app"
+jenkins_install_dir: "/opt/jenkins"

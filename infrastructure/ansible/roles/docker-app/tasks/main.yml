@@ -1,0 +1,45 @@
+---
+# =============================================================================
+# DevOps Testing App - Docker App Role Tasks
+# =============================================================================
+
+- name: Ensure application directory exists
+  file:
+    path: "{{ app_install_dir }}"
+    state: directory
+    owner: ec2-user
+    group: ec2-user
+    mode: '0755'
+
+- name: Create docker-compose file
+  template:
+    src: docker-compose.yml.j2
+    dest: "{{ app_install_dir }}/docker-compose.yml"
+    owner: ec2-user
+    group: ec2-user
+    mode: '0644'
+  notify: Restart app container
+
+- name: Pull application image
+  docker_image:
+    name: "{{ docker_image }}:{{ docker_tag }}"
+    source: pull
+  register: pull_result
+  ignore_errors: yes
+
+- name: Start application container
+  community.docker.docker_compose_v2:
+    project_src: "{{ app_install_dir }}"
+    state: present
+  register: app_output
+  when: pull_result is succeeded
+
+- name: Wait for application to be healthy
+  uri:
+    url: "http://localhost:{{ app_port }}/health"
+    status_code: 200
+  register: health_result
+  until: health_result.status == 200
+  retries: 12
+  delay: 5
+  when: app_output is succeeded

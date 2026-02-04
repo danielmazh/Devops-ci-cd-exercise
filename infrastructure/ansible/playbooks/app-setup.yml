@@ -1,0 +1,143 @@
+---
+# =============================================================================
+# DevOps Testing App - App Server Setup Playbook
+# =============================================================================
+# Prepares the application server with Docker and dependencies
+# Usage: ansible-playbook playbooks/app-setup.yml -i inventory/staging.ini
+# =============================================================================
+
+- name: Setup Application Server
+  hosts: app
+  become: yes
+  gather_facts: yes
+
+  pre_tasks:
+    - name: Wait for system to be ready
+      wait_for_connection:
+        timeout: 300
+
+    - name: Gather facts
+      setup:
+
+  tasks:
+    # -------------------------------------------------------------------------
+    # Verify Docker Installation
+    # -------------------------------------------------------------------------
+    - name: Verify Docker is installed
+      command: docker --version
+      register: docker_version
+      changed_when: false
+
+    - name: Display Docker version
+      debug:
+        msg: "Docker version: {{ docker_version.stdout }}"
+
+    - name: Ensure Docker service is running
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+
+    # -------------------------------------------------------------------------
+    # Create Application Directories
+    # -------------------------------------------------------------------------
+    - name: Create application directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: ec2-user
+        group: ec2-user
+        mode: '0755'
+      loop:
+        - "{{ app_install_dir }}"
+        - "{{ app_install_dir }}/logs"
+        - "{{ app_install_dir }}/backup"
+
+    # -------------------------------------------------------------------------
+    # Login to Docker Hub
+    # -------------------------------------------------------------------------
+    - name: Login to Docker Hub
+      docker_login:
+        username: "{{ docker_hub_username }}"
+        password: "{{ docker_hub_token }}"
+        registry_url: "https://index.docker.io/v1/"
+      when: docker_hub_token | length > 0
+
+    # -------------------------------------------------------------------------
+    # Create Docker Compose File
+    # -------------------------------------------------------------------------
+    - name: Create application docker-compose.yml
+      template:
+        src: ../roles/docker-app/templates/docker-compose.yml.j2
+        dest: "{{ app_install_dir }}/docker-compose.yml"
+        owner: ec2-user
+        group: ec2-user
+        mode: '0644'
+
+    # -------------------------------------------------------------------------
+    # Create Environment File
+    # -------------------------------------------------------------------------
+    - name: Create .env file
+      copy:
+        content: |
+          # Application Environment
+          ENVIRONMENT={{ environment }}
+          DOCKER_IMAGE={{ docker_image }}
+          IMAGE_TAG={{ docker_tag }}
+          APP_PORT={{ app_port }}
+          FLASK_ENV={{ flask_env }}
+          SECRET_KEY={{ flask_secret_key }}
+        dest: "{{ app_install_dir }}/.env"
+        owner: ec2-user
+        group: ec2-user
+        mode: '0600'
+
+    # -------------------------------------------------------------------------
+    # Pull Application Image
+    # -------------------------------------------------------------------------
+    - name: Pull application Docker image
+      docker_image:
+        name: "{{ docker_image }}:{{ docker_tag }}"
+        source: pull
+      register: pull_result
+      ignore_errors: yes
+
+    - name: Display pull result
+      debug:
+        msg: "{{ 'Image pulled successfully' if pull_result is succeeded else 'Image not available yet - will be built by Jenkins' }}"
+
+    # -------------------------------------------------------------------------
+    # Setup Log Rotation
+    # -------------------------------------------------------------------------
+    - name: Configure Docker log rotation
+      copy:
+        content: |
+          {
+            "log-driver": "json-file",
+            "log-opts": {
+              "max-size": "10m",
+              "max-file": "5"
+            }
+          }
+        dest: /etc/docker/daemon.json
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Restart Docker
+
+  handlers:
+    - name: Restart Docker
+      systemd:
+        name: docker
+        state: restarted
+
+  post_tasks:
+    - name: App server setup complete
+      debug:
+        msg: |
+          ============================================
+          App server setup completed!
+          Host: {{ ansible_host }}
+          App URL: http://{{ ansible_host }}
+          Install Dir: {{ app_install_dir }}
+          ============================================

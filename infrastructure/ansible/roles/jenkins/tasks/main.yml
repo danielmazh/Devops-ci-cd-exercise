@@ -1,0 +1,62 @@
+---
+# =============================================================================
+# DevOps Testing App - Jenkins Role Tasks
+# =============================================================================
+
+- name: Include Jenkins setup tasks
+  include_tasks: setup.yml
+
+---
+# setup.yml - Create this as a separate file or inline
+- name: Ensure Jenkins directories exist
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: 1000
+    group: 1000
+    mode: '0755'
+  loop:
+    - "{{ jenkins_home }}"
+    - "{{ jenkins_casc_dir }}"
+    - "/opt/jenkins/backup"
+
+- name: Copy Jenkins CasC configuration
+  template:
+    src: jenkins-casc.yaml.j2
+    dest: "{{ jenkins_casc_dir }}/jenkins.yaml"
+    owner: 1000
+    group: 1000
+    mode: '0644'
+  notify: Restart Jenkins container
+
+- name: Copy Jenkins plugins list
+  copy:
+    src: plugins.txt
+    dest: "/opt/jenkins/plugins.txt"
+    owner: 1000
+    group: 1000
+    mode: '0644'
+
+- name: Create Jenkins docker-compose file
+  template:
+    src: docker-compose.yml.j2
+    dest: "/opt/jenkins/docker-compose.yml"
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart Jenkins container
+
+- name: Start Jenkins container
+  community.docker.docker_compose_v2:
+    project_src: /opt/jenkins
+    state: present
+  register: jenkins_output
+
+- name: Wait for Jenkins to be ready
+  uri:
+    url: "http://localhost:{{ jenkins_port }}/login"
+    status_code: 200
+  register: result
+  until: result.status == 200
+  retries: 30
+  delay: 10

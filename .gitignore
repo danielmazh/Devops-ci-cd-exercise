@@ -45,3 +45,27 @@ htmlcov/
 temp/
 tmp/
 images_slides/
+
+# Terraform
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# Ansible
+*.retry
+/tmp/ansible_facts_cache/
+
+# Secrets (NEVER commit)
+*.pem
+*.key
+secrets/

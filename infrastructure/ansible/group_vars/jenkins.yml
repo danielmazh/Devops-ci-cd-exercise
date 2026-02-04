@@ -1,0 +1,42 @@
+# =============================================================================
+# DevOps Testing App - Ansible Group Variables (Jenkins)
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Jenkins Configuration
+# -----------------------------------------------------------------------------
+jenkins_home: "/opt/jenkins/data"
+jenkins_casc_dir: "/opt/jenkins/casc"
+jenkins_port: 8080
+jenkins_agent_port: 50000
+
+jenkins_admin_user: "admin"
+jenkins_admin_password: "{{ lookup('env', 'JENKINS_ADMIN_PASSWORD') | default('DevOps2026!', true) }}"
+
+# Jenkins Java options
+jenkins_java_opts: >-
+  -Djenkins.install.runSetupWizard=false
+  -Djava.awt.headless=true
+  -Dhudson.security.csrf.GlobalCrumbIssuerConfiguration.DISABLE_CSRF_PROTECTION=false
+
+# Jenkins URL (will be set dynamically)
+jenkins_url: "http://{{ ansible_host }}:{{ jenkins_port }}"
+
+# -----------------------------------------------------------------------------
+# Jenkins Docker Image
+# -----------------------------------------------------------------------------
+jenkins_docker_image: "jenkins/jenkins:lts-jdk17"
+jenkins_container_name: "jenkins"
+
+# -----------------------------------------------------------------------------
+# App Server Connection (for deployments)
+# -----------------------------------------------------------------------------
+app_server_ip: "{{ hostvars[groups['app'][0]]['ansible_host'] | default('') }}"
+app_server_user: "ec2-user"
+
+# -----------------------------------------------------------------------------
+# AWS Configuration (for Jenkins)
+# -----------------------------------------------------------------------------
+aws_region: "us-east-1"
+aws_access_key: "{{ lookup('env', 'AWS_ACCESS_KEY_ID') | default('', true) }}"
+aws_secret_key: "{{ lookup('env', 'AWS_SECRET_ACCESS_KEY') | default('', true) }}"
