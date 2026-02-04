@@ -1,0 +1,64 @@
+# =============================================================================
+# Jenkins Plugins List
+# =============================================================================
+# Install with: jenkins-plugin-cli --plugin-file plugins.txt
+# =============================================================================
+
+# Core Pipeline
+workflow-aggregator:latest
+pipeline-stage-view:latest
+pipeline-graph-view:latest
+
+# Git Integration
+git:latest
+github:latest
+github-branch-source:latest
+
+# Docker
+docker-workflow:latest
+docker-plugin:latest
+
+# Credentials
+credentials:latest
+credentials-binding:latest
+plain-credentials:latest
+
+# Build Tools
+timestamper:latest
+ansicolor:latest
+build-timeout:latest
+
+# Test & Coverage
+junit:latest
+jacoco:latest
+cobertura:latest
+htmlpublisher:latest
+
+# Notifications
+email-ext:latest
+mailer:latest
+
+# Configuration as Code
+configuration-as-code:latest
+job-dsl:latest
+
+# Utilities
+ws-cleanup:latest
+rebuild:latest
+build-name-setter:latest
+
+# AWS Integration
+aws-credentials:latest
+
+# HTTP Requests (for JIRA/Slack)
+http_request:latest
+
+# Blue Ocean UI (optional but nice)
+blueocean:latest
+
+# SSH & Ansible
+ssh-agent:latest
+ansible:latest
+
+# Terraform
+terraform:latest

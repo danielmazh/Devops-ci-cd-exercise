@@ -1,0 +1,90 @@
+# =============================================================================
+# DevOps Testing App - Development Docker Compose
+# =============================================================================
+# Usage: docker-compose -f docker/docker-compose.yml up -d
+# =============================================================================
+
+version: "3.9"
+
+services:
+  # ---------------------------------------------------------------------------
+  # Application Service (Development)
+  # ---------------------------------------------------------------------------
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: development
+    image: devops-testing-app:dev
+    container_name: devops-app-dev
+    ports:
+      - "5000:5000"
+    environment:
+      - FLASK_ENV=development
+      - FLASK_DEBUG=1
+      - SECRET_KEY=dev-secret-key-change-in-production
+    volumes:
+      # Mount source code for hot-reload
+      - ../app:/app/app:ro
+      - ../main.py:/app/main.py:ro
+      - ../calc.py:/app/calc.py:ro
+      - ../tests:/app/tests:ro
+      - ../pytest.ini:/app/pytest.ini:ro
+      # Reports directory (writable)
+      - ../reports:/app/reports
+      - ../htmlcov:/app/htmlcov
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - devops-network
+
+  # ---------------------------------------------------------------------------
+  # Test Runner Service
+  # ---------------------------------------------------------------------------
+  test:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: testing
+    image: devops-testing-app:test
+    container_name: devops-app-test
+    environment:
+      - FLASK_ENV=testing
+    volumes:
+      - ../app:/app/app:ro
+      - ../main.py:/app/main.py:ro
+      - ../calc.py:/app/calc.py:ro
+      - ../tests:/app/tests:ro
+      - ../pytest.ini:/app/pytest.ini:ro
+      - ../reports:/app/reports
+      - ../htmlcov:/app/htmlcov
+    profiles:
+      - testing
+    networks:
+      - devops-network
+
+networks:
+  devops-network:
+    driver: bridge
+    name: devops-network
+
+# =============================================================================
+# Usage Examples:
+# =============================================================================
+# Start development server:
+#   docker-compose -f docker/docker-compose.yml up -d app
+#
+# Run tests:
+#   docker-compose -f docker/docker-compose.yml run --rm test
+#
+# View logs:
+#   docker-compose -f docker/docker-compose.yml logs -f app
+#
+# Stop all:
+#   docker-compose -f docker/docker-compose.yml down
+# =============================================================================

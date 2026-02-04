@@ -1,0 +1,164 @@
+# =============================================================================
+# Jenkins Configuration as Code (CasC)
+# =============================================================================
+# This file auto-configures Jenkins on startup
+# Credentials will be injected via environment variables
+# =============================================================================
+
+jenkins:
+  systemMessage: |
+    DevOps Testing App - CI/CD Pipeline
+    Managed by Configuration as Code
+    
+  numExecutors: 4
+  mode: NORMAL
+  
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: "${JENKINS_ADMIN_ID:-admin}"
+          name: "Administrator"
+          password: "${JENKINS_ADMIN_PASSWORD:-admin}"
+  
+  authorizationStrategy:
+    loggedInUsersCanDoAnything:
+      allowAnonymousRead: false
+
+  remotingSecurity:
+    enabled: true
+
+# -----------------------------------------------------------------------------
+# Credentials Configuration
+# -----------------------------------------------------------------------------
+credentials:
+  system:
+    domainCredentials:
+      - credentials:
+          # Docker Hub Credentials
+          - usernamePassword:
+              scope: GLOBAL
+              id: "docker-hub-credentials"
+              username: "${DOCKER_HUB_USERNAME}"
+              password: "${DOCKER_HUB_TOKEN}"
+              description: "Docker Hub credentials for pushing images"
+          
+          # GitHub Credentials
+          - usernamePassword:
+              scope: GLOBAL
+              id: "github-credentials"
+              username: "${GITHUB_USERNAME}"
+              password: "${GITHUB_TOKEN}"
+              description: "GitHub credentials for repository access"
+          
+          # AWS Credentials
+          - aws:
+              scope: GLOBAL
+              id: "aws-credentials"
+              accessKey: "${AWS_ACCESS_KEY_ID}"
+              secretKey: "${AWS_SECRET_ACCESS_KEY}"
+              description: "AWS credentials for deployment"
+          
+          # JIRA Credentials
+          - usernamePassword:
+              scope: GLOBAL
+              id: "jira-credentials"
+              username: "${JIRA_EMAIL}"
+              password: "${JIRA_API_TOKEN}"
+              description: "JIRA credentials for issue creation"
+          
+          # SSH Key for App Server
+          - basicSSHUserPrivateKey:
+              scope: GLOBAL
+              id: "aws-ssh-key"
+              username: "ec2-user"
+              privateKeySource:
+                directEntry:
+                  privateKey: "${AWS_SSH_PRIVATE_KEY}"
+              description: "SSH key for AWS EC2 instances"
+
+# -----------------------------------------------------------------------------
+# Global Environment Variables
+# -----------------------------------------------------------------------------
+globalEnvVars:
+  env:
+    - key: "DOCKER_REGISTRY"
+      value: "docker.io"
+    - key: "DOCKER_IMAGE"
+      value: "${DOCKER_HUB_USERNAME}/devops-testing-app"
+    - key: "JIRA_URL"
+      value: "${JIRA_URL}"
+    - key: "JIRA_PROJECT_KEY"
+      value: "${JIRA_PROJECT_KEY}"
+    - key: "NOTIFICATION_EMAIL"
+      value: "${NOTIFICATION_EMAIL}"
+    - key: "APP_SERVER_IP"
+      value: "${APP_SERVER_IP}"
+
+# -----------------------------------------------------------------------------
+# Unclassified Configuration
+# -----------------------------------------------------------------------------
+unclassified:
+  location:
+    url: "${JENKINS_URL:-http://localhost:8080/}"
+    adminAddress: "${NOTIFICATION_EMAIL:-admin@example.com}"
+  
+  email-ext:
+    defaultRecipients: "${NOTIFICATION_EMAIL}"
+    mailAccount:
+      smtpHost: "${SMTP_HOST:-smtp.gmail.com}"
+      smtpPort: "${SMTP_PORT:-587}"
+      useSsl: false
+      useTls: true
+  
+  gitHubPluginConfig:
+    hookUrl: "${JENKINS_URL:-http://localhost:8080}/github-webhook/"
+
+# -----------------------------------------------------------------------------
+# Tool Configuration
+# -----------------------------------------------------------------------------
+tool:
+  git:
+    installations:
+      - name: "Default"
+        home: "git"
+
+# -----------------------------------------------------------------------------
+# Jobs Configuration (using Job DSL)
+# -----------------------------------------------------------------------------
+jobs:
+  - script: |
+      pipelineJob('devops-testing-app') {
+        displayName('DevOps Testing App Pipeline')
+        description('CI/CD Pipeline for DevOps Testing Application')
+        
+        definition {
+          cpsScm {
+            scm {
+              git {
+                remote {
+                  url('https://github.com/${GITHUB_USERNAME}/devops-ci-cd-exercise.git')
+                  credentials('github-credentials')
+                }
+                branches('*/main', '*/develop')
+              }
+            }
+            scriptPath('jenkins/Jenkinsfile')
+            lightweight(true)
+          }
+        }
+        
+        triggers {
+          githubPush()
+        }
+        
+        properties {
+          buildDiscarder {
+            strategy {
+              logRotator {
+                numToKeepStr('10')
+              }
+            }
+          }
+        }
+      }

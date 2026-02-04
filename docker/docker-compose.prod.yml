@@ -1,0 +1,72 @@
+# =============================================================================
+# DevOps Testing App - Production Docker Compose
+# =============================================================================
+# Used by Ansible for deployment to AWS EC2
+# Usage: docker-compose -f docker-compose.prod.yml up -d
+# =============================================================================
+
+version: "3.9"
+
+services:
+  # ---------------------------------------------------------------------------
+  # Application Service (Production)
+  # ---------------------------------------------------------------------------
+  app:
+    image: ${DOCKER_REGISTRY:-docker.io}/${DOCKER_IMAGE:-danielmazh/devops-testing-app}:${IMAGE_TAG:-latest}
+    container_name: devops-app-${ENVIRONMENT:-staging}
+    ports:
+      - "${APP_PORT:-80}:5000"
+    environment:
+      - FLASK_ENV=${ENVIRONMENT:-staging}
+      - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+        tag: "devops-app-{{.Name}}"
+    networks:
+      - devops-network
+    labels:
+      - "com.devops.service=app"
+      - "com.devops.environment=${ENVIRONMENT:-staging}"
+
+networks:
+  devops-network:
+    driver: bridge
+    name: devops-network-${ENVIRONMENT:-staging}
+
+# =============================================================================
+# Environment Variables (set before running):
+# =============================================================================
+# DOCKER_REGISTRY    - Docker registry (default: docker.io)
+# DOCKER_IMAGE       - Image name (default: danielmazh/devops-testing-app)
+# IMAGE_TAG          - Image tag (default: latest)
+# ENVIRONMENT        - Environment name (staging/production)
+# APP_PORT           - Host port to expose (default: 80)
+# SECRET_KEY         - Flask secret key
+# =============================================================================
+#
+# Example deployment:
+#   export DOCKER_IMAGE=danielmazh/devops-testing-app
+#   export IMAGE_TAG=42-abc123
+#   export ENVIRONMENT=staging
+#   export SECRET_KEY=$(openssl rand -hex 32)
+#   docker-compose -f docker-compose.prod.yml pull
+#   docker-compose -f docker-compose.prod.yml up -d
+# =============================================================================

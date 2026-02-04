@@ -1,0 +1,74 @@
+# =============================================================================
+# DevOps Testing App - Custom Jenkins Dockerfile
+# =============================================================================
+# Jenkins with pre-installed plugins and configuration
+# Used for AWS deployment
+# =============================================================================
+
+FROM jenkins/jenkins:lts-jdk17
+
+# Skip initial setup wizard
+ENV JAVA_OPTS="-Djenkins.install.runSetupWizard=false"
+
+# Jenkins Configuration as Code
+ENV CASC_JENKINS_CONFIG=/var/jenkins_home/casc_configs
+
+# Switch to root to install packages
+USER root
+
+# Install required system packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    apt-transport-https \
+    ca-certificates \
+    curl \
+    gnupg \
+    lsb-release \
+    python3 \
+    python3-pip \
+    python3-venv \
+    jq \
+    gettext-base \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Docker CLI (for building images)
+RUN curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/debian $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null && \
+    apt-get update && \
+    apt-get install -y docker-ce-cli && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Terraform
+RUN curl -fsSL https://releases.hashicorp.com/terraform/1.6.6/terraform_1.6.6_linux_amd64.zip -o terraform.zip && \
+    unzip terraform.zip && \
+    mv terraform /usr/local/bin/ && \
+    rm terraform.zip
+
+# Install Ansible
+RUN pip3 install --no-cache-dir ansible boto3 botocore
+
+# Install AWS CLI
+RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
+    unzip awscliv2.zip && \
+    ./aws/install && \
+    rm -rf aws awscliv2.zip
+
+# Create CasC directory
+RUN mkdir -p /var/jenkins_home/casc_configs && \
+    chown -R jenkins:jenkins /var/jenkins_home/casc_configs
+
+# Switch back to jenkins user
+USER jenkins
+
+# Copy plugins list and install plugins
+COPY --chown=jenkins:jenkins plugins.txt /usr/share/jenkins/ref/plugins.txt
+RUN jenkins-plugin-cli --plugin-file /usr/share/jenkins/ref/plugins.txt
+
+# Copy Jenkins Configuration as Code
+COPY --chown=jenkins:jenkins casc/ /var/jenkins_home/casc_configs/
+
+# Expose ports
+EXPOSE 8080 50000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
+    CMD curl -f http://localhost:8080/login || exit 1
