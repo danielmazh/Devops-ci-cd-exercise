@@ -5,9 +5,9 @@ import pytest
 def zero():
     return 0
 
-@pytest.mark.bad
+@pytest.mark.good
 def test_add():
-    assert add(2, 3) == 7
+    assert add(2, 3) == 5
 
 @pytest.mark.good
 def test_subtract():
