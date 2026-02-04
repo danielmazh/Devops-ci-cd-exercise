@@ -3,11 +3,9 @@
 # DevOps Testing App - Jenkins Role Tasks
 # =============================================================================
 
-- name: Include Jenkins setup tasks
-  include_tasks: setup.yml
-
----
-# setup.yml - Create this as a separate file or inline
+# -----------------------------------------------------------------------------
+# Directory Setup
+# -----------------------------------------------------------------------------
 - name: Ensure Jenkins directories exist
   file:
     path: "{{ item }}"
@@ -17,9 +15,14 @@
     mode: '0755'
   loop:
     - "{{ jenkins_home }}"
+    - "{{ jenkins_home }}/jobs/devops-testing-app"
+    - "{{ jenkins_home }}/secrets"
     - "{{ jenkins_casc_dir }}"
     - "/opt/jenkins/backup"
 
+# -----------------------------------------------------------------------------
+# Configuration Files
+# -----------------------------------------------------------------------------
 - name: Copy Jenkins CasC configuration
   template:
     src: jenkins-casc.yaml.j2
@@ -46,12 +49,94 @@
     mode: '0644'
   notify: Restart Jenkins container
 
+# -----------------------------------------------------------------------------
+# Create Pipeline Job Config
+# -----------------------------------------------------------------------------
+- name: Create Jenkins pipeline job config
+  copy:
+    dest: "{{ jenkins_home }}/jobs/devops-testing-app/config.xml"
+    owner: 1000
+    group: 1000
+    mode: '0644'
+    content: |
+      <?xml version="1.1" encoding="UTF-8"?>
+      <flow-definition plugin="workflow-job">
+        <description>DevOps Testing App CI/CD Pipeline</description>
+        <keepDependencies>false</keepDependencies>
+        <definition class="org.jenkinsci.plugins.workflow.cps.CpsScmFlowDefinition" plugin="workflow-cps">
+          <scm class="hudson.plugins.git.GitSCM" plugin="git">
+            <configVersion>2</configVersion>
+            <userRemoteConfigs>
+              <hudson.plugins.git.UserRemoteConfig>
+                <url>https://github.com/{{ github_username }}/{{ github_repo }}.git</url>
+              </hudson.plugins.git.UserRemoteConfig>
+            </userRemoteConfigs>
+            <branches>
+              <hudson.plugins.git.BranchSpec>
+                <name>*/main</name>
+              </hudson.plugins.git.BranchSpec>
+            </branches>
+          </scm>
+          <scriptPath>jenkins/Jenkinsfile</scriptPath>
+          <lightweight>true</lightweight>
+        </definition>
+        <disabled>false</disabled>
+      </flow-definition>
+
+# -----------------------------------------------------------------------------
+# Create Docker Credentials Files
+# -----------------------------------------------------------------------------
+- name: Create Docker username secret file
+  copy:
+    dest: "{{ jenkins_home }}/secrets/docker-username"
+    owner: 1000
+    group: 1000
+    mode: '0600'
+    content: "{{ docker_hub_username }}"
+
+- name: Create Docker password secret file
+  copy:
+    dest: "{{ jenkins_home }}/secrets/docker-password"
+    owner: 1000
+    group: 1000
+    mode: '0600'
+    content: "{{ docker_hub_token }}"
+
+# -----------------------------------------------------------------------------
+# Start Jenkins Container
+# -----------------------------------------------------------------------------
 - name: Start Jenkins container
   community.docker.docker_compose_v2:
     project_src: /opt/jenkins
     state: present
   register: jenkins_output
 
+- name: Wait for Jenkins container to be running
+  pause:
+    seconds: 30
+
+# -----------------------------------------------------------------------------
+# Install Tools in Jenkins Container
+# -----------------------------------------------------------------------------
+- name: Install Python in Jenkins container
+  command: >
+    docker exec -u root jenkins bash -c 
+    "apt-get update && apt-get install -y python3 python3-pip python3-venv && ln -sf /usr/bin/python3 /usr/bin/python || true"
+  register: python_install
+  changed_when: "'Setting up python3' in python_install.stdout"
+  ignore_errors: yes
+
+- name: Install Docker CLI in Jenkins container
+  command: >
+    docker exec -u root jenkins bash -c 
+    "apt-get install -y docker.io && usermod -aG docker jenkins && chmod 666 /var/run/docker.sock"
+  register: docker_install
+  changed_when: "'Setting up docker' in docker_install.stdout"
+  ignore_errors: yes
+
+# -----------------------------------------------------------------------------
+# Wait for Jenkins to be Ready
+# -----------------------------------------------------------------------------
 - name: Wait for Jenkins to be ready
   uri:
     url: "http://localhost:{{ jenkins_port }}/login"

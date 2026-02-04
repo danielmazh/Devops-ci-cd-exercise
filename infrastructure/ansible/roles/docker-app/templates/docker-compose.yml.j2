@@ -6,12 +6,12 @@ version: "{{ docker_compose_version | default('3.9') }}"
 services:
   app:
     image: {{ docker_image }}:{{ docker_tag | default('latest') }}
-    container_name: {{ app_container_name | default('devops-app-' + environment) }}
+    container_name: {{ app_container_name | default('devops-app') }}
     restart: always
     ports:
       - "{{ app_port | default(80) }}:{{ app_internal_port | default(5000) }}"
     environment:
-      - FLASK_ENV={{ flask_env | default(environment) }}
+      - FLASK_ENV={{ flask_env | default('production') }}
       - SECRET_KEY={{ flask_secret_key | default('change-me') }}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:{{ app_internal_port | default(5000) }}{{ health_check_endpoint | default('/health') }}"]
@@ -36,10 +36,10 @@ services:
       - app-network
     labels:
       - "com.devops.service=app"
-      - "com.devops.environment={{ environment }}"
+      - "com.devops.environment={{ deploy_env | default('staging') }}"
       - "com.devops.version={{ docker_tag | default('latest') }}"
 
 networks:
   app-network:
     driver: bridge
-    name: devops-app-network-{{ environment }}
+    name: devops-app-network

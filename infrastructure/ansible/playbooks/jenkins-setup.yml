@@ -14,6 +14,23 @@
   vars:
     jenkins_home: "/opt/jenkins/data"
     jenkins_casc_dir: "/opt/jenkins/casc"
+    # Explicit vars for templates
+    github_username: "danielmazh"
+    github_repo: "devops-ci-cd-exercise"
+    environment: "staging"
+    docker_hub_username: "danielmazh"
+    docker_hub_token: "{{ lookup('env', 'DOCKER_HUB_TOKEN') | default('', true) }}"
+    github_token: ""
+    jira_url: "https://danielmaz.atlassian.net"
+    jira_email: "daniel.mazhbits@gmail.com"
+    jira_api_token: ""
+    jira_project_key: "CICD"
+    notification_email: "daniel.mazhbits@gmail.com"
+    jenkins_admin_user: "admin"
+    jenkins_admin_password: "DevOps2026!"
+    jenkins_port: 8080
+    jenkins_agent_port: 50000
+    app_server_ip: "{{ hostvars['app-server']['ansible_host'] | default('') }}"
     
   pre_tasks:
     - name: Wait for system to be ready
@@ -54,8 +71,64 @@
         mode: '0755'
       loop:
         - "{{ jenkins_home }}"
+        - "{{ jenkins_home }}/jobs/devops-testing-app"
+        - "{{ jenkins_home }}/secrets"
         - "{{ jenkins_casc_dir }}"
         - "/opt/jenkins/backup"
+
+    # -------------------------------------------------------------------------
+    # Create Pipeline Job Config (before Jenkins starts)
+    # -------------------------------------------------------------------------
+    - name: Create Jenkins pipeline job config
+      copy:
+        dest: "{{ jenkins_home }}/jobs/devops-testing-app/config.xml"
+        owner: 1000
+        group: 1000
+        mode: '0644'
+        content: |
+          <?xml version="1.1" encoding="UTF-8"?>
+          <flow-definition plugin="workflow-job">
+            <description>DevOps Testing App CI/CD Pipeline</description>
+            <keepDependencies>false</keepDependencies>
+            <definition class="org.jenkinsci.plugins.workflow.cps.CpsScmFlowDefinition" plugin="workflow-cps">
+              <scm class="hudson.plugins.git.GitSCM" plugin="git">
+                <configVersion>2</configVersion>
+                <userRemoteConfigs>
+                  <hudson.plugins.git.UserRemoteConfig>
+                    <url>https://github.com/{{ github_username }}/{{ github_repo }}.git</url>
+                  </hudson.plugins.git.UserRemoteConfig>
+                </userRemoteConfigs>
+                <branches>
+                  <hudson.plugins.git.BranchSpec>
+                    <name>*/main</name>
+                  </hudson.plugins.git.BranchSpec>
+                </branches>
+              </scm>
+              <scriptPath>jenkins/Jenkinsfile</scriptPath>
+              <lightweight>true</lightweight>
+            </definition>
+            <disabled>false</disabled>
+          </flow-definition>
+
+    # -------------------------------------------------------------------------
+    # Create Docker Credentials Files
+    # -------------------------------------------------------------------------
+    - name: Create Docker username secret file
+      copy:
+        dest: "{{ jenkins_home }}/secrets/docker-username"
+        owner: 1000
+        group: 1000
+        mode: '0600'
+        content: "{{ docker_hub_username }}"
+
+    - name: Create Docker password secret file
+      copy:
+        dest: "{{ jenkins_home }}/secrets/docker-password"
+        owner: 1000
+        group: 1000
+        mode: '0600'
+        content: "{{ docker_hub_token }}"
+      when: docker_hub_token | length > 0
 
     # -------------------------------------------------------------------------
     # Copy Jenkins Configuration as Code
@@ -132,6 +205,41 @@
       until: jenkins_health.status == 200
       retries: 30
       delay: 10
+
+    # -------------------------------------------------------------------------
+    # Install Tools in Jenkins Container
+    # -------------------------------------------------------------------------
+    - name: Install Python in Jenkins container
+      command: >
+        docker exec -u root jenkins bash -c 
+        "apt-get update && apt-get install -y python3 python3-pip python3-venv && ln -sf /usr/bin/python3 /usr/bin/python || true"
+      register: python_install
+      changed_when: "'Setting up python3' in python_install.stdout"
+      ignore_errors: yes
+
+    - name: Install Docker CLI in Jenkins container
+      command: >
+        docker exec -u root jenkins bash -c 
+        "apt-get install -y docker.io && usermod -aG docker jenkins && chmod 666 /var/run/docker.sock"
+      register: docker_install
+      changed_when: "'Setting up docker' in docker_install.stdout"
+      ignore_errors: yes
+
+    - name: Verify Python installation in Jenkins
+      command: docker exec jenkins python3 --version
+      register: python_version
+      changed_when: false
+
+    - name: Verify Docker access in Jenkins
+      command: docker exec jenkins docker --version
+      register: docker_version_jenkins
+      changed_when: false
+
+    - name: Display tool versions
+      debug:
+        msg: |
+          Python in Jenkins: {{ python_version.stdout }}
+          Docker in Jenkins: {{ docker_version_jenkins.stdout }}
 
     # -------------------------------------------------------------------------
     # Get Initial Admin Password (if CasC didn't set it)

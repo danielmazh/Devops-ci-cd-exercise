@@ -11,6 +11,20 @@
   become: yes
   gather_facts: yes
 
+  vars:
+    app_install_dir: "/opt/devops-app"
+    docker_hub_username: "danielmazh"
+    docker_hub_token: ""
+    docker_image: "danielmazh/devops-testing-app"
+    docker_tag: "latest"
+    app_port: 80
+    app_container_port: 5000
+    app_internal_port: 5000
+    deploy_env: "staging"
+    app_container_name: "devops-app"
+    flask_env: "production"
+    flask_secret_key: "devops-secret-key-2026"
+
   pre_tasks:
     - name: Wait for system to be ready
       wait_for_connection:

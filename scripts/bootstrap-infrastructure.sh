@@ -104,11 +104,8 @@ PREREQUISITES:
     2. Terraform >= 1.0.0 installed
     3. Ansible >= 2.9 installed
     4. SSH key file exists (path in terraform.tfvars)
-    5. Environment variables set (or in terraform.tfvars):
-       - DOCKER_HUB_USERNAME
-       - DOCKER_HUB_TOKEN
-       - GITHUB_TOKEN
-       - JIRA_API_TOKEN
+    5. Environment variable for Docker Hub (required for docker push):
+       export DOCKER_HUB_TOKEN='your-docker-hub-personal-access-token'
 
 EOF
 }
@@ -295,6 +292,13 @@ run_ansible() {
     export ANSIBLE_HOST_KEY_CHECKING=False
     export SSH_KEY_PATH="$ssh_key_path"
     
+    # Get Docker Hub token from environment or prompt
+    local docker_hub_token="${DOCKER_HUB_TOKEN:-}"
+    if [[ -z "$docker_hub_token" ]]; then
+        log_warning "DOCKER_HUB_TOKEN not set. Docker push will fail in Jenkins."
+        log_info "Set it with: export DOCKER_HUB_TOKEN='your-token'"
+    fi
+    
     # Setup Jenkins
     log_info "Setting up Jenkins server..."
     if [[ "$DRY_RUN" == true ]]; then
@@ -303,7 +307,9 @@ run_ansible() {
         ansible-playbook playbooks/jenkins-setup.yml \
             -i inventory/staging.ini \
             --private-key="$ssh_key_path" \
-            -e "ansible_ssh_private_key_file=$ssh_key_path"
+            -e "ansible_ssh_private_key_file=$ssh_key_path" \
+            -e "docker_hub_token=${docker_hub_token}" \
+            -e "app_server_ip=$APP_IP"
     fi
     
     # Setup App server
@@ -314,7 +320,8 @@ run_ansible() {
         ansible-playbook playbooks/app-setup.yml \
             -i inventory/staging.ini \
             --private-key="$ssh_key_path" \
-            -e "ansible_ssh_private_key_file=$ssh_key_path"
+            -e "ansible_ssh_private_key_file=$ssh_key_path" \
+            -e "docker_hub_token=${docker_hub_token}"
     fi
     
     cd "$PROJECT_ROOT"
