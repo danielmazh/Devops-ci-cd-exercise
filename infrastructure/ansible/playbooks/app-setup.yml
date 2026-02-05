@@ -1,6 +1,6 @@
 ---
 # =============================================================================
-# DevOps Testing App - App Server Setup Playbook
+# DevOps Testing App - App Server Setup Playbook (PRODUCTION READY)
 # =============================================================================
 # Prepares the application server with Docker and dependencies
 # Usage: ansible-playbook playbooks/app-setup.yml -i inventory/staging.ini
@@ -13,8 +13,8 @@
 
   vars:
     app_install_dir: "/opt/devops-app"
-    docker_hub_username: "danielmazh"
-    docker_hub_token: ""
+    docker_hub_username: "{{ lookup('env', 'DOCKER_HUB_USERNAME') | default('danielmazh', true) }}"
+    docker_hub_token: "{{ lookup('env', 'DOCKER_HUB_TOKEN') | default('', true) }}"
     docker_image: "danielmazh/devops-testing-app"
     docker_tag: "latest"
     app_port: 80
@@ -24,6 +24,7 @@
     app_container_name: "devops-app"
     flask_env: "production"
     flask_secret_key: "devops-secret-key-2026"
+    environment: "staging"
 
   pre_tasks:
     - name: Wait for system to be ready
@@ -35,22 +36,81 @@
 
   tasks:
     # -------------------------------------------------------------------------
-    # Verify Docker Installation
+    # Install System Dependencies
     # -------------------------------------------------------------------------
-    - name: Verify Docker is installed
+    - name: Install required packages
+      yum:
+        name:
+          - python3
+          - python3-pip
+          - git
+          - jq
+          - curl
+        state: present
+      register: pkg_result
+      retries: 3
+      delay: 10
+      until: pkg_result is succeeded
+
+    # -------------------------------------------------------------------------
+    # Install Docker (if not already installed by cloud-init)
+    # -------------------------------------------------------------------------
+    - name: Check if Docker is installed
       command: docker --version
-      register: docker_version
+      register: docker_check
+      ignore_errors: yes
       changed_when: false
 
-    - name: Display Docker version
-      debug:
-        msg: "Docker version: {{ docker_version.stdout }}"
+    - name: Install Docker via Amazon Linux Extras
+      shell: |
+        amazon-linux-extras install docker -y
+        systemctl start docker
+        systemctl enable docker
+        usermod -aG docker ec2-user
+      when: docker_check.rc != 0
+      register: docker_install
 
-    - name: Ensure Docker service is running
+    - name: Verify Docker is running
       systemd:
         name: docker
         state: started
         enabled: yes
+
+    - name: Display Docker version
+      command: docker --version
+      register: docker_version
+      changed_when: false
+
+    - name: Show Docker version
+      debug:
+        msg: "Docker version: {{ docker_version.stdout }}"
+
+    # -------------------------------------------------------------------------
+    # Install Docker Compose
+    # -------------------------------------------------------------------------
+    - name: Check if Docker Compose is installed
+      command: docker compose version
+      register: compose_check
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Install Docker Compose Plugin
+      shell: |
+        mkdir -p /usr/local/lib/docker/cli-plugins
+        curl -SL "https://github.com/docker/compose/releases/download/v2.24.0/docker-compose-linux-x86_64" -o /usr/local/lib/docker/cli-plugins/docker-compose
+        chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+        ln -sf /usr/local/lib/docker/cli-plugins/docker-compose /usr/local/bin/docker-compose
+      when: compose_check.rc != 0
+      register: compose_install
+
+    - name: Verify Docker Compose installation
+      command: docker compose version
+      register: compose_version
+      changed_when: false
+
+    - name: Show Docker Compose version
+      debug:
+        msg: "Docker Compose version: {{ compose_version.stdout }}"
 
     # -------------------------------------------------------------------------
     # Create Application Directories
@@ -71,11 +131,12 @@
     # Login to Docker Hub
     # -------------------------------------------------------------------------
     - name: Login to Docker Hub
-      docker_login:
+      community.docker.docker_login:
         username: "{{ docker_hub_username }}"
         password: "{{ docker_hub_token }}"
         registry_url: "https://index.docker.io/v1/"
       when: docker_hub_token | length > 0
+      ignore_errors: yes
 
     # -------------------------------------------------------------------------
     # Create Docker Compose File
@@ -107,10 +168,10 @@
         mode: '0600'
 
     # -------------------------------------------------------------------------
-    # Pull Application Image
+    # Pull Application Image (optional - Jenkins will push it)
     # -------------------------------------------------------------------------
     - name: Pull application Docker image
-      docker_image:
+      community.docker.docker_image:
         name: "{{ docker_image }}:{{ docker_tag }}"
         source: pull
       register: pull_result

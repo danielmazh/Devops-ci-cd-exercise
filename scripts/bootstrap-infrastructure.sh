@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Bootstrap Infrastructure Script
+# Bootstrap Infrastructure Script - PRODUCTION READY
 # =============================================================================
 # Single-command deployment for the entire DevOps CI/CD infrastructure
 # 
@@ -15,7 +15,7 @@
 #   --help           Show this help message
 #
 # Prerequisites:
-#   - AWS CLI configured (~/.aws/credentials)
+#   - AWS CLI configured (~/.aws/credentials) OR .env file with credentials
 #   - Terraform installed
 #   - Ansible installed
 #   - SSH key at path specified in terraform.tfvars
@@ -30,6 +30,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 TERRAFORM_DIR="$PROJECT_ROOT/infrastructure/terraform"
 ANSIBLE_DIR="$PROJECT_ROOT/infrastructure/ansible"
+ENV_FILE="$PROJECT_ROOT/.env"
 
 # Colors for output
 RED='\033[0;31m'
@@ -45,29 +46,42 @@ SKIP_TERRAFORM=false
 SKIP_ANSIBLE=false
 DESTROY=false
 
+# Timeouts
+INSTANCE_READY_TIMEOUT=300
+JENKINS_START_TIMEOUT=600
+SSH_TIMEOUT=30
+
 # -----------------------------------------------------------------------------
 # Helper Functions
 # -----------------------------------------------------------------------------
 log_info() {
-    echo -e "${BLUE}[INFO]${NC} $1"
+    echo -e "${BLUE}[INFO]${NC} $(date '+%H:%M:%S') $1"
 }
 
 log_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
+    echo -e "${GREEN}[SUCCESS]${NC} $(date '+%H:%M:%S') $1"
 }
 
 log_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
+    echo -e "${YELLOW}[WARNING]${NC} $(date '+%H:%M:%S') $1"
 }
 
 log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+    echo -e "${RED}[ERROR]${NC} $(date '+%H:%M:%S') $1"
 }
 
 log_step() {
     echo -e "\n${CYAN}═══════════════════════════════════════════════════════════════${NC}"
     echo -e "${CYAN}  $1${NC}"
     echo -e "${CYAN}═══════════════════════════════════════════════════════════════${NC}\n"
+}
+
+# Run command with timeout
+run_with_timeout() {
+    local timeout=$1
+    shift
+    timeout $timeout "$@"
+    return $?
 }
 
 show_help() {
@@ -100,14 +114,73 @@ EXAMPLES:
     ./$(basename "$0") --destroy
 
 PREREQUISITES:
-    1. AWS CLI configured with credentials
+    1. AWS CLI configured OR credentials in .env file
     2. Terraform >= 1.0.0 installed
     3. Ansible >= 2.9 installed
     4. SSH key file exists (path in terraform.tfvars)
-    5. Environment variable for Docker Hub (required for docker push):
-       export DOCKER_HUB_TOKEN='your-docker-hub-personal-access-token'
+
+ENVIRONMENT FILE (.env):
+    If you prefer, create a .env file in the project root with:
+        AWS_ACCESS_KEY_ID=your-access-key
+        AWS_SECRET_ACCESS_KEY=your-secret-key
+        AWS_REGION=us-east-1
+        DOCKER_HUB_TOKEN=your-docker-token
+        GITHUB_TOKEN=your-github-token (optional)
+        JIRA_API_TOKEN=your-jira-token (optional)
 
 EOF
+}
+
+load_env_file() {
+    if [[ -f "$ENV_FILE" ]]; then
+        log_info "Loading credentials from .env file..."
+        set -a
+        source "$ENV_FILE"
+        set +a
+        log_success "Loaded .env file"
+    fi
+}
+
+load_credentials_from_tfvars() {
+    log_info "Loading credentials from terraform.tfvars..."
+    
+    local tfvars="$TERRAFORM_DIR/terraform.tfvars"
+    if [[ ! -f "$tfvars" ]]; then
+        log_error "terraform.tfvars not found!"
+        return 1
+    fi
+    
+    # Export AWS credentials
+    export AWS_ACCESS_KEY_ID=$(grep -E "^aws_access_key\s*=" "$tfvars" | cut -d'"' -f2 || echo "")
+    export AWS_SECRET_ACCESS_KEY=$(grep -E "^aws_secret_key\s*=" "$tfvars" | cut -d'"' -f2 || echo "")
+    export AWS_DEFAULT_REGION=$(grep -E "^aws_region\s*=" "$tfvars" | cut -d'"' -f2 || echo "us-east-1")
+    
+    # Export Docker Hub credentials
+    export DOCKER_HUB_USERNAME=$(grep -E "^docker_hub_username\s*=" "$tfvars" | cut -d'"' -f2 || echo "")
+    export DOCKER_HUB_TOKEN=$(grep -E "^docker_hub_token\s*=" "$tfvars" | cut -d'"' -f2 || echo "")
+    
+    # Export GitHub credentials
+    export GITHUB_USERNAME=$(grep -E "^github_username\s*=" "$tfvars" | cut -d'"' -f2 || echo "")
+    export GITHUB_TOKEN=$(grep -E "^github_token\s*=" "$tfvars" | cut -d'"' -f2 || echo "")
+    export GITHUB_REPO=$(grep -E "^github_repo\s*=" "$tfvars" | cut -d'"' -f2 || echo "")
+    
+    # Export JIRA credentials
+    export JIRA_URL=$(grep -E "^jira_url\s*=" "$tfvars" | cut -d'"' -f2 || echo "")
+    export JIRA_EMAIL=$(grep -E "^jira_email\s*=" "$tfvars" | cut -d'"' -f2 || echo "")
+    export JIRA_API_TOKEN=$(grep -E "^jira_api_token\s*=" "$tfvars" | cut -d'"' -f2 || echo "")
+    export JIRA_PROJECT_KEY=$(grep -E "^jira_project_key\s*=" "$tfvars" | cut -d'"' -f2 || echo "CICD")
+    
+    # Export Jenkins credentials
+    export JENKINS_ADMIN_USER=$(grep -E "^jenkins_admin_user\s*=" "$tfvars" | cut -d'"' -f2 || echo "admin")
+    export JENKINS_ADMIN_PASSWORD=$(grep -E "^jenkins_admin_password\s*=" "$tfvars" | cut -d'"' -f2 || echo "DevOps2026!")
+    
+    # Export SSH key path (note: it's ssh_private_key_path in tfvars)
+    export SSH_KEY_PATH=$(grep -E "^ssh_private_key_path\s*=" "$tfvars" | cut -d'"' -f2 || echo "")
+    
+    # Export notification email
+    export NOTIFICATION_EMAIL=$(grep -E "^owner_email\s*=" "$tfvars" | cut -d'"' -f2 || echo "")
+    
+    log_success "Loaded credentials from terraform.tfvars"
 }
 
 check_prerequisites() {
@@ -116,7 +189,7 @@ check_prerequisites() {
     local missing=()
     
     # Check required commands
-    for cmd in terraform ansible-playbook aws jq; do
+    for cmd in terraform ansible-playbook jq nc curl; do
         if ! command -v $cmd &> /dev/null; then
             missing+=("$cmd")
         else
@@ -124,13 +197,23 @@ check_prerequisites() {
         fi
     done
     
+    # Load credentials from .env file first, then tfvars
+    load_env_file
+    load_credentials_from_tfvars
+    
     # Check AWS credentials
-    if ! aws sts get-caller-identity &> /dev/null; then
-        log_error "AWS credentials not configured or invalid"
+    if [[ -z "$AWS_ACCESS_KEY_ID" || -z "$AWS_SECRET_ACCESS_KEY" ]]; then
+        log_error "AWS credentials not found in .env or terraform.tfvars"
         missing+=("aws-credentials")
     else
-        local account_id=$(aws sts get-caller-identity --query Account --output text)
-        log_success "AWS credentials valid (Account: $account_id)"
+        # Verify AWS credentials work
+        if aws sts get-caller-identity &> /dev/null; then
+            local account_id=$(aws sts get-caller-identity --query Account --output text)
+            log_success "AWS credentials valid (Account: $account_id)"
+        else
+            log_error "AWS credentials invalid"
+            missing+=("aws-credentials")
+        fi
     fi
     
     # Check terraform.tfvars exists
@@ -141,17 +224,29 @@ check_prerequisites() {
         log_success "terraform.tfvars found"
     fi
     
-    # Check SSH key
-    local ssh_key_path=$(grep -E "^ssh_key_path" "$TERRAFORM_DIR/terraform.tfvars" 2>/dev/null | cut -d'"' -f2 || echo "")
+    # Check SSH key (using ssh_private_key_path from tfvars)
+    local ssh_key_path="$SSH_KEY_PATH"
     ssh_key_path=$(eval echo "$ssh_key_path")  # Expand ~ if present
+    
     if [[ -n "$ssh_key_path" && -f "$ssh_key_path" ]]; then
         log_success "SSH key found: $ssh_key_path"
+        export SSH_KEY_PATH="$ssh_key_path"
     else
-        log_warning "SSH key not found or not specified"
+        log_error "SSH key not found at: $ssh_key_path"
+        missing+=("ssh-key")
+    fi
+    
+    # Check Docker Hub token
+    if [[ -z "$DOCKER_HUB_TOKEN" ]]; then
+        log_warning "DOCKER_HUB_TOKEN not set. Docker push will fail in Jenkins."
+    else
+        log_success "Docker Hub token configured"
     fi
     
     if [[ ${#missing[@]} -gt 0 ]]; then
         log_error "Missing prerequisites: ${missing[*]}"
+        echo ""
+        echo "Please ensure all prerequisites are met before running this script."
         exit 1
     fi
     
@@ -180,7 +275,7 @@ run_terraform() {
     fi
     
     # Apply
-    log_info "Applying infrastructure..."
+    log_info "Applying infrastructure (this may take 3-5 minutes)..."
     if [[ "$DRY_RUN" == true ]]; then
         log_info "[DRY-RUN] Would run: terraform apply tfplan"
     else
@@ -197,6 +292,11 @@ run_terraform() {
         export JENKINS_IP=$(terraform output -raw jenkins_public_ip 2>/dev/null || echo "")
         export APP_IP=$(terraform output -raw app_public_ip 2>/dev/null || echo "")
         
+        if [[ -z "$JENKINS_IP" || -z "$APP_IP" ]]; then
+            log_error "Failed to get IPs from Terraform outputs"
+            exit 1
+        fi
+        
         log_success "Jenkins IP: $JENKINS_IP"
         log_success "App IP: $APP_IP"
     fi
@@ -205,7 +305,7 @@ run_terraform() {
 }
 
 create_ansible_inventory() {
-    log_step "Creating Ansible Dynamic Inventory"
+    log_step "Creating Ansible Inventory"
     
     if [[ "$DRY_RUN" == true ]]; then
         log_info "[DRY-RUN] Would create dynamic inventory"
@@ -223,7 +323,7 @@ create_ansible_inventory() {
         exit 1
     fi
     
-    # Create staging inventory
+    # Create staging inventory with HARDCODED SSH key path (not Jinja2)
     cat > "$ANSIBLE_DIR/inventory/staging.ini" << EOF
 # Auto-generated by bootstrap script
 # Generated: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -236,11 +336,12 @@ app-server ansible_host=$APP_IP
 
 [all:vars]
 ansible_user=ec2-user
-ansible_ssh_private_key_file={{ lookup('env', 'SSH_KEY_PATH') | default('~/.ssh/daniel-devops.pem', true) }}
-ansible_ssh_common_args='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
+ansible_ssh_private_key_file=$SSH_KEY_PATH
+ansible_ssh_common_args=-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=30
 EOF
     
     log_success "Created inventory at $ANSIBLE_DIR/inventory/staging.ini"
+    cat "$ANSIBLE_DIR/inventory/staging.ini"
 }
 
 wait_for_instances() {
@@ -254,30 +355,40 @@ wait_for_instances() {
     local max_attempts=30
     local attempt=1
     
-    log_info "Waiting for SSH connectivity (this may take 1-2 minutes)..."
+    log_info "Waiting for SSH connectivity (timeout: ${INSTANCE_READY_TIMEOUT}s)..."
     
     for ip in $JENKINS_IP $APP_IP; do
         log_info "Checking $ip..."
         attempt=1
+        local start_time=$(date +%s)
+        
         while [[ $attempt -le $max_attempts ]]; do
             if nc -z -w5 "$ip" 22 2>/dev/null; then
                 log_success "$ip is reachable on port 22"
                 break
             fi
-            log_info "Attempt $attempt/$max_attempts - waiting for $ip..."
+            
+            local elapsed=$(($(date +%s) - start_time))
+            if [[ $elapsed -gt $INSTANCE_READY_TIMEOUT ]]; then
+                log_error "Timeout waiting for $ip after ${elapsed}s"
+                exit 1
+            fi
+            
+            log_info "Attempt $attempt/$max_attempts - waiting for $ip... (${elapsed}s elapsed)"
             sleep 10
             ((attempt++))
         done
         
         if [[ $attempt -gt $max_attempts ]]; then
-            log_error "Timeout waiting for $ip"
+            log_error "Max attempts reached waiting for $ip"
             exit 1
         fi
     done
     
     # Extra wait for cloud-init to complete
-    log_info "Waiting 30 seconds for cloud-init to complete..."
-    sleep 30
+    log_info "Waiting 45 seconds for cloud-init to complete..."
+    sleep 45
+    log_success "All instances ready!"
 }
 
 run_ansible() {
@@ -285,31 +396,53 @@ run_ansible() {
     
     cd "$ANSIBLE_DIR"
     
-    # Get SSH key path
-    local ssh_key_path=$(grep -E "^ssh_key_path" "$TERRAFORM_DIR/terraform.tfvars" 2>/dev/null | cut -d'"' -f2 || echo "~/.ssh/daniel-devops.pem")
-    ssh_key_path=$(eval echo "$ssh_key_path")
-    
     export ANSIBLE_HOST_KEY_CHECKING=False
-    export SSH_KEY_PATH="$ssh_key_path"
     
-    # Get Docker Hub token from environment or prompt
-    local docker_hub_token="${DOCKER_HUB_TOKEN:-}"
-    if [[ -z "$docker_hub_token" ]]; then
-        log_warning "DOCKER_HUB_TOKEN not set. Docker push will fail in Jenkins."
-        log_info "Set it with: export DOCKER_HUB_TOKEN='your-token'"
-    fi
+    # Build extra vars string
+    local extra_vars=(
+        "ansible_ssh_private_key_file=$SSH_KEY_PATH"
+        "docker_hub_username=$DOCKER_HUB_USERNAME"
+        "docker_hub_token=$DOCKER_HUB_TOKEN"
+        "github_username=$GITHUB_USERNAME"
+        "github_token=$GITHUB_TOKEN"
+        "github_repo=$GITHUB_REPO"
+        "jira_url=$JIRA_URL"
+        "jira_email=$JIRA_EMAIL"
+        "jira_api_token=$JIRA_API_TOKEN"
+        "jira_project_key=$JIRA_PROJECT_KEY"
+        "jenkins_admin_user=$JENKINS_ADMIN_USER"
+        "jenkins_admin_password=$JENKINS_ADMIN_PASSWORD"
+        "notification_email=$NOTIFICATION_EMAIL"
+        "app_server_ip=$APP_IP"
+        "aws_access_key=$AWS_ACCESS_KEY_ID"
+        "aws_secret_key=$AWS_SECRET_ACCESS_KEY"
+        "aws_region=$AWS_DEFAULT_REGION"
+    )
     
     # Setup Jenkins
-    log_info "Setting up Jenkins server..."
+    log_info "Setting up Jenkins server (this may take 5-10 minutes)..."
     if [[ "$DRY_RUN" == true ]]; then
         log_info "[DRY-RUN] Would run: ansible-playbook playbooks/jenkins-setup.yml"
     else
+        local jenkins_start=$(date +%s)
+        
         ansible-playbook playbooks/jenkins-setup.yml \
             -i inventory/staging.ini \
-            --private-key="$ssh_key_path" \
-            -e "ansible_ssh_private_key_file=$ssh_key_path" \
-            -e "docker_hub_token=${docker_hub_token}" \
-            -e "app_server_ip=$APP_IP"
+            --private-key="$SSH_KEY_PATH" \
+            $(printf -- '-e %s ' "${extra_vars[@]}") \
+            -v 2>&1 | tee /tmp/ansible-jenkins.log
+        
+        local jenkins_result=$?
+        local jenkins_elapsed=$(($(date +%s) - jenkins_start))
+        
+        if [[ $jenkins_result -ne 0 ]]; then
+            log_error "Jenkins setup failed after ${jenkins_elapsed}s!"
+            log_error "Check logs at /tmp/ansible-jenkins.log"
+            tail -50 /tmp/ansible-jenkins.log
+            exit 1
+        fi
+        
+        log_success "Jenkins setup completed in ${jenkins_elapsed}s"
     fi
     
     # Setup App server
@@ -319,13 +452,111 @@ run_ansible() {
     else
         ansible-playbook playbooks/app-setup.yml \
             -i inventory/staging.ini \
-            --private-key="$ssh_key_path" \
-            -e "ansible_ssh_private_key_file=$ssh_key_path" \
-            -e "docker_hub_token=${docker_hub_token}"
+            --private-key="$SSH_KEY_PATH" \
+            $(printf -- '-e %s ' "${extra_vars[@]}") \
+            -v 2>&1 | tee /tmp/ansible-app.log
+        
+        if [[ $? -ne 0 ]]; then
+            log_error "App setup failed! Check logs at /tmp/ansible-app.log"
+            tail -50 /tmp/ansible-app.log
+            exit 1
+        fi
+        
+        log_success "App setup completed"
     fi
     
     cd "$PROJECT_ROOT"
-    log_success "Ansible configuration complete!"
+}
+
+wait_for_jenkins() {
+    log_step "Waiting for Jenkins to be Fully Ready"
+    
+    if [[ "$DRY_RUN" == true ]]; then
+        log_info "[DRY-RUN] Would wait for Jenkins"
+        return
+    fi
+    
+    local start_time=$(date +%s)
+    local max_wait=$JENKINS_START_TIMEOUT
+    
+    log_info "Waiting for Jenkins to be accessible (timeout: ${max_wait}s)..."
+    
+    while true; do
+        local elapsed=$(($(date +%s) - start_time))
+        
+        if [[ $elapsed -gt $max_wait ]]; then
+            log_error "Timeout waiting for Jenkins after ${elapsed}s"
+            log_info "Checking Jenkins container logs..."
+            ssh -i "$SSH_KEY_PATH" -o StrictHostKeyChecking=no ec2-user@$JENKINS_IP \
+                "docker logs jenkins 2>&1 | tail -30" || true
+            exit 1
+        fi
+        
+        if curl -sf "http://$JENKINS_IP:8080/login" > /dev/null 2>&1; then
+            log_success "Jenkins is accessible at http://$JENKINS_IP:8080"
+            break
+        fi
+        
+        log_info "Waiting for Jenkins... (${elapsed}s elapsed)"
+        sleep 15
+    done
+}
+
+install_jenkins_plugins() {
+    log_step "Ensuring Jenkins Plugins are Installed"
+    
+    if [[ "$DRY_RUN" == true ]]; then
+        log_info "[DRY-RUN] Would install Jenkins plugins"
+        return
+    fi
+    
+    log_info "Installing critical Jenkins plugins..."
+    
+    # Wait a bit for Jenkins to fully initialize
+    sleep 30
+    
+    # List of critical plugins to verify/install
+    local plugins=(
+        "workflow-aggregator"
+        "pipeline-stage-view"
+        "git"
+        "github"
+        "docker-workflow"
+        "credentials-binding"
+        "junit"
+        "htmlpublisher"
+        "email-ext"
+        "configuration-as-code"
+        "job-dsl"
+        "ws-cleanup"
+        "timestamper"
+        "ansicolor"
+        "http_request"
+    )
+    
+    # Install plugins via CLI
+    ssh -i "$SSH_KEY_PATH" -o StrictHostKeyChecking=no ec2-user@$JENKINS_IP << 'ENDSSH'
+# Download Jenkins CLI
+docker exec jenkins curl -sO http://localhost:8080/jnlpJars/jenkins-cli.jar -o /tmp/jenkins-cli.jar 2>/dev/null || true
+
+# Install plugins
+for plugin in workflow-aggregator pipeline-stage-view git github docker-workflow credentials-binding junit htmlpublisher email-ext configuration-as-code job-dsl ws-cleanup timestamper ansicolor http_request; do
+    echo "Installing plugin: $plugin"
+    docker exec jenkins java -jar /tmp/jenkins-cli.jar -s http://localhost:8080 -auth admin:DevOps2026! install-plugin $plugin -deploy 2>/dev/null || true
+done
+
+# Restart Jenkins to activate plugins
+echo "Restarting Jenkins to activate plugins..."
+docker restart jenkins
+ENDSSH
+    
+    log_info "Waiting for Jenkins restart (60s)..."
+    sleep 60
+    
+    # Wait for Jenkins to be ready again
+    wait_for_jenkins
+    
+    log_success "Jenkins plugins installed and ready"
 }
 
 run_health_checks() {
@@ -340,31 +571,65 @@ run_health_checks() {
     
     # Check Jenkins
     log_info "Checking Jenkins at http://$JENKINS_IP:8080..."
-    local jenkins_attempts=0
-    while [[ $jenkins_attempts -lt 10 ]]; do
-        if curl -sf "http://$JENKINS_IP:8080/login" > /dev/null 2>&1; then
-            log_success "Jenkins is accessible!"
-            break
+    if curl -sf "http://$JENKINS_IP:8080/login" > /dev/null 2>&1; then
+        log_success "Jenkins is accessible!"
+        
+        # Check if job exists
+        if curl -sf -u "$JENKINS_ADMIN_USER:$JENKINS_ADMIN_PASSWORD" \
+            "http://$JENKINS_IP:8080/job/devops-testing-app/api/json" > /dev/null 2>&1; then
+            log_success "Pipeline job 'devops-testing-app' exists!"
+        else
+            log_warning "Pipeline job may need manual reload (check Jenkins UI)"
         fi
-        log_info "Waiting for Jenkins to start... (attempt $((jenkins_attempts+1))/10)"
-        sleep 30
-        ((jenkins_attempts++))
-    done
-    
-    if [[ $jenkins_attempts -ge 10 ]]; then
-        log_warning "Jenkins may not be ready yet. Check manually at http://$JENKINS_IP:8080"
+    else
+        log_warning "Jenkins may not be ready yet"
         all_healthy=false
     fi
     
-    # Check App (if deployed)
-    log_info "Checking App at http://$APP_IP..."
-    if curl -sf "http://$APP_IP/health" > /dev/null 2>&1; then
-        log_success "App is healthy!"
+    # Check App server Docker
+    log_info "Checking App server at $APP_IP..."
+    if ssh -i "$SSH_KEY_PATH" -o StrictHostKeyChecking=no ec2-user@$APP_IP "docker --version" &>/dev/null; then
+        log_success "App server Docker is ready!"
     else
-        log_warning "App not yet deployed or not healthy (this is expected on first run)"
+        log_warning "App server Docker not ready"
+        all_healthy=false
     fi
     
     return 0
+}
+
+trigger_first_build() {
+    log_step "Triggering First Jenkins Build"
+    
+    if [[ "$DRY_RUN" == true ]]; then
+        log_info "[DRY-RUN] Would trigger first build"
+        return
+    fi
+    
+    log_info "Triggering initial pipeline build..."
+    
+    # Get crumb and trigger build
+    local crumb_response=$(curl -s -u "$JENKINS_ADMIN_USER:$JENKINS_ADMIN_PASSWORD" \
+        -c /tmp/jenkins-cookies.txt \
+        "http://$JENKINS_IP:8080/crumbIssuer/api/json")
+    
+    local crumb=$(echo "$crumb_response" | jq -r '.crumb' 2>/dev/null || echo "")
+    
+    if [[ -n "$crumb" && "$crumb" != "null" ]]; then
+        curl -s -X POST \
+            -u "$JENKINS_ADMIN_USER:$JENKINS_ADMIN_PASSWORD" \
+            -b /tmp/jenkins-cookies.txt \
+            -H "Jenkins-Crumb:$crumb" \
+            -H "Content-Type: application/x-www-form-urlencoded" \
+            "http://$JENKINS_IP:8080/job/devops-testing-app/buildWithParameters" \
+            -d "" 2>/dev/null
+        
+        log_success "Build triggered! Check Jenkins UI for progress."
+    else
+        log_warning "Could not trigger build automatically. Please trigger manually from Jenkins UI."
+    fi
+    
+    rm -f /tmp/jenkins-cookies.txt
 }
 
 print_summary() {
@@ -385,16 +650,17 @@ print_summary() {
   📍 App URL:         http://${APP_IP}
   📍 App Health:      http://${APP_IP}/health
 
-  🔑 To get Jenkins initial admin password:
-     ./scripts/get-jenkins-password.sh
+  🔑 Jenkins Credentials:
+     Username: ${JENKINS_ADMIN_USER:-admin}
+     Password: ${JENKINS_ADMIN_PASSWORD:-DevOps2026!}
 
   🔗 SSH Commands:
-     Jenkins: ssh -i ~/.ssh/daniel-devops.pem ec2-user@${JENKINS_IP}
-     App:     ssh -i ~/.ssh/daniel-devops.pem ec2-user@${APP_IP}
+     Jenkins: ssh -i $SSH_KEY_PATH ec2-user@${JENKINS_IP}
+     App:     ssh -i $SSH_KEY_PATH ec2-user@${APP_IP}
 
   📋 Next Steps:
      1. Access Jenkins at http://${JENKINS_IP}:8080
-     2. Login with admin credentials (use get-jenkins-password.sh)
+     2. Login with admin credentials
      3. Run the 'devops-testing-app' pipeline
      4. Monitor deployment at http://${APP_IP}
 
@@ -472,6 +738,8 @@ main() {
     echo "╚══════════════════════════════════════════════════════════════════════════════╝"
     echo ""
     
+    local start_time=$(date +%s)
+    
     # Run prerequisite checks
     check_prerequisites
     
@@ -497,6 +765,8 @@ main() {
         create_ansible_inventory
         wait_for_instances
         run_ansible
+        wait_for_jenkins
+        install_jenkins_plugins
     else
         log_info "Skipping Ansible (--skip-ansible)"
     fi
@@ -504,10 +774,14 @@ main() {
     # Health checks
     run_health_checks
     
+    # Optionally trigger first build
+    # trigger_first_build
+    
     # Print summary
     print_summary
     
-    log_success "Bootstrap complete!"
+    local total_time=$(($(date +%s) - start_time))
+    log_success "Bootstrap complete in ${total_time}s!"
 }
 
 # Run main

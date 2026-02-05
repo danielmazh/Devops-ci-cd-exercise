@@ -1,0 +1,81 @@
+# =============================================================================
+# DevOps Testing App - Terraform Variables TEMPLATE
+# =============================================================================
+# COPY THIS FILE to terraform.tfvars and fill in your values:
+#   cp terraform.tfvars.example terraform.tfvars
+#
+# ⚠️  WARNING: terraform.tfvars contains sensitive credentials
+# ⚠️  NEVER commit terraform.tfvars to version control!
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# AWS Configuration (REQUIRED)
+# -----------------------------------------------------------------------------
+# Get from: AWS Console → IAM → Users → Security Credentials → Access Keys
+aws_region     = "us-east-1"
+aws_access_key = "AKIAXXXXXXXXXXXXXXXX"
+aws_secret_key = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+# -----------------------------------------------------------------------------
+# Project Configuration
+# -----------------------------------------------------------------------------
+project_name = "devops-testing-app"
+environment  = "staging"
+owner_email  = "your-email@example.com"
+
+# -----------------------------------------------------------------------------
+# Network Configuration
+# -----------------------------------------------------------------------------
+vpc_cidr            = "10.0.0.0/16"
+public_subnet_cidrs = ["10.0.1.0/24", "10.0.2.0/24"]
+
+# Your IP for SSH access (use 0.0.0.0/0 for testing, restrict in production)
+allowed_ssh_cidrs = ["0.0.0.0/0"]
+
+# -----------------------------------------------------------------------------
+# EC2 Configuration
+# -----------------------------------------------------------------------------
+# Jenkins: t3.large recommended (2 vCPU, 8GB RAM) for comfortable builds
+jenkins_instance_type = "t3.large"
+jenkins_volume_size   = 30
+
+# App: t3.micro is sufficient for the Flask application
+app_instance_type = "t3.micro"
+app_volume_size   = 30
+
+# SSH Key - MUST exist in AWS EC2 Key Pairs
+# Create at: AWS Console → EC2 → Key Pairs → Create Key Pair
+key_name             = "your-key-name"
+ssh_private_key_path = "/path/to/your/key.pem"
+
+# -----------------------------------------------------------------------------
+# Docker Hub Configuration (REQUIRED for pushing images)
+# -----------------------------------------------------------------------------
+# Get token from: https://hub.docker.com/settings/security → New Access Token
+docker_hub_username = "your-dockerhub-username"
+docker_hub_token    = "dckr_pat_xxxxxxxxxxxxxxxxxxxxxxxxx"
+docker_image_name   = "devops-testing-app"
+
+# -----------------------------------------------------------------------------
+# GitHub Configuration (OPTIONAL - for private repos)
+# -----------------------------------------------------------------------------
+# Get token from: https://github.com/settings/tokens → Generate new token
+# Required scopes: repo, workflow
+github_username = "your-github-username"
+github_token    = "ghp_xxxxxxxxxxxxxxxxxxxxxxxxx"
+github_repo     = "devops-ci-cd-exercise"
+
+# -----------------------------------------------------------------------------
+# JIRA Configuration (OPTIONAL - for issue tracking on failures)
+# -----------------------------------------------------------------------------
+# Get token from: https://id.atlassian.com/manage-profile/security/api-tokens
+jira_url         = "https://your-domain.atlassian.net"
+jira_email       = "your-email@example.com"
+jira_api_token   = "your-jira-api-token"
+jira_project_key = "CICD"
+
+# -----------------------------------------------------------------------------
+# Jenkins Configuration
+# -----------------------------------------------------------------------------
+jenkins_admin_user     = "admin"
+jenkins_admin_password = "YourSecurePassword123!"

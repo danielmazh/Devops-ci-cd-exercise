@@ -1,56 +1,74 @@
 # =============================================================================
-# Jenkins Plugins List
+# Jenkins Plugins List - PRODUCTION READY
 # =============================================================================
+# These plugins are installed automatically by Jenkins on startup
 
-# Core Pipeline
+# Core Pipeline (REQUIRED)
 workflow-aggregator
 pipeline-stage-view
 pipeline-graph-view
 pipeline-build-step
+pipeline-utility-steps
+pipeline-milestone-step
+pipeline-model-definition
 
-# Git Integration
+# Git Integration (REQUIRED)
 git
+git-client
 github
 github-branch-source
+github-api
 
-# Docker
+# Docker (REQUIRED)
 docker-workflow
 docker-plugin
+docker-commons
 
-# Credentials
+# Credentials (REQUIRED)
 credentials
 credentials-binding
 plain-credentials
+ssh-credentials
 
-# Build Tools
+# Build Tools (REQUIRED)
 timestamper
 ansicolor
 build-timeout
+build-name-setter
 
-# Test & Coverage
+# Test & Coverage (REQUIRED)
 junit
 cobertura
 htmlpublisher
+warnings-ng
 
-# Notifications
+# Notifications (OPTIONAL but recommended)
 email-ext
 mailer
 
-# Configuration as Code
+# Configuration as Code (REQUIRED)
 configuration-as-code
 job-dsl
 
-# Utilities
+# Utilities (REQUIRED)
 ws-cleanup
 rebuild
-build-name-setter
+matrix-project
+script-security
 
 # HTTP Requests (for JIRA/Slack)
 http_request
 
-# SSH
+# SSH (REQUIRED for deployments)
 ssh-agent
 ssh-slaves
+publish-over-ssh
 
-# AWS
+# AWS (OPTIONAL but recommended)
 aws-credentials
+
+# Node/Label management
+nodelabelparameter
+
+# Dashboard
+dashboard-view

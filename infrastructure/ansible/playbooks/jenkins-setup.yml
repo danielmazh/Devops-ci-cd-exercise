@@ -1,8 +1,8 @@
 ---
 # =============================================================================
-# DevOps Testing App - Jenkins Setup Playbook
+# DevOps Testing App - Jenkins Setup Playbook (PRODUCTION READY)
 # =============================================================================
-# Installs and configures Jenkins on EC2 instance
+# Installs and configures Jenkins on EC2 instance with all dependencies
 # Usage: ansible-playbook playbooks/jenkins-setup.yml -i inventory/staging.ini
 # =============================================================================
 
@@ -10,27 +10,30 @@
   hosts: jenkins
   become: yes
   gather_facts: yes
-
+  
   vars:
     jenkins_home: "/opt/jenkins/data"
     jenkins_casc_dir: "/opt/jenkins/casc"
-    # Explicit vars for templates
-    github_username: "danielmazh"
-    github_repo: "devops-ci-cd-exercise"
+    # Explicit vars for templates (with defaults)
+    github_username: "{{ lookup('env', 'GITHUB_USERNAME') | default('danielmazh', true) }}"
+    github_repo: "{{ lookup('env', 'GITHUB_REPO') | default('devops-ci-cd-exercise', true) }}"
     environment: "staging"
-    docker_hub_username: "danielmazh"
+    docker_hub_username: "{{ lookup('env', 'DOCKER_HUB_USERNAME') | default('danielmazh', true) }}"
     docker_hub_token: "{{ lookup('env', 'DOCKER_HUB_TOKEN') | default('', true) }}"
-    github_token: ""
-    jira_url: "https://danielmaz.atlassian.net"
-    jira_email: "daniel.mazhbits@gmail.com"
-    jira_api_token: ""
-    jira_project_key: "CICD"
-    notification_email: "daniel.mazhbits@gmail.com"
-    jenkins_admin_user: "admin"
-    jenkins_admin_password: "DevOps2026!"
+    github_token: "{{ lookup('env', 'GITHUB_TOKEN') | default('', true) }}"
+    jira_url: "{{ lookup('env', 'JIRA_URL') | default('https://danielmaz.atlassian.net', true) }}"
+    jira_email: "{{ lookup('env', 'JIRA_EMAIL') | default('daniel.mazhbits@gmail.com', true) }}"
+    jira_api_token: "{{ lookup('env', 'JIRA_API_TOKEN') | default('', true) }}"
+    jira_project_key: "{{ lookup('env', 'JIRA_PROJECT_KEY') | default('CICD', true) }}"
+    notification_email: "{{ lookup('env', 'NOTIFICATION_EMAIL') | default('daniel.mazhbits@gmail.com', true) }}"
+    jenkins_admin_user: "{{ lookup('env', 'JENKINS_ADMIN_USER') | default('admin', true) }}"
+    jenkins_admin_password: "{{ lookup('env', 'JENKINS_ADMIN_PASSWORD') | default('DevOps2026!', true) }}"
     jenkins_port: 8080
     jenkins_agent_port: 50000
     app_server_ip: "{{ hostvars['app-server']['ansible_host'] | default('') }}"
+    aws_access_key: "{{ lookup('env', 'AWS_ACCESS_KEY_ID') | default('', true) }}"
+    aws_secret_key: "{{ lookup('env', 'AWS_SECRET_ACCESS_KEY') | default('', true) }}"
+    aws_region: "{{ lookup('env', 'AWS_DEFAULT_REGION') | default('us-east-1', true) }}"
     
   pre_tasks:
     - name: Wait for system to be ready
@@ -42,22 +45,83 @@
 
   tasks:
     # -------------------------------------------------------------------------
-    # Verify Docker Installation
+    # Install System Dependencies
     # -------------------------------------------------------------------------
-    - name: Verify Docker is installed
+    - name: Install required packages
+      yum:
+        name:
+          - python3
+          - python3-pip
+          - git
+          - jq
+          - curl
+          - wget
+          - unzip
+        state: present
+      register: pkg_result
+      retries: 3
+      delay: 10
+      until: pkg_result is succeeded
+
+    # -------------------------------------------------------------------------
+    # Install Docker (if not already installed by cloud-init)
+    # -------------------------------------------------------------------------
+    - name: Check if Docker is installed
       command: docker --version
-      register: docker_version
+      register: docker_check
+      ignore_errors: yes
       changed_when: false
 
-    - name: Display Docker version
-      debug:
-        msg: "Docker version: {{ docker_version.stdout }}"
-
-    - name: Ensure Docker service is running
+    - name: Install Docker via Amazon Linux Extras
+      shell: |
+        amazon-linux-extras install docker -y
+        systemctl start docker
+        systemctl enable docker
+        usermod -aG docker ec2-user
+      when: docker_check.rc != 0
+      register: docker_install
+      
+    - name: Verify Docker is running
       systemd:
         name: docker
         state: started
         enabled: yes
+
+    - name: Display Docker version
+      command: docker --version
+      register: docker_version
+      changed_when: false
+
+    - name: Show Docker version
+      debug:
+        msg: "Docker version: {{ docker_version.stdout }}"
+
+    # -------------------------------------------------------------------------
+    # Install Docker Compose
+    # -------------------------------------------------------------------------
+    - name: Check if Docker Compose is installed
+      command: docker compose version
+      register: compose_check
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Install Docker Compose Plugin
+      shell: |
+        mkdir -p /usr/local/lib/docker/cli-plugins
+        curl -SL "https://github.com/docker/compose/releases/download/v2.24.0/docker-compose-linux-x86_64" -o /usr/local/lib/docker/cli-plugins/docker-compose
+        chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+        ln -sf /usr/local/lib/docker/cli-plugins/docker-compose /usr/local/bin/docker-compose
+      when: compose_check.rc != 0
+      register: compose_install
+
+    - name: Verify Docker Compose installation
+      command: docker compose version
+      register: compose_version
+      changed_when: false
+
+    - name: Show Docker Compose version
+      debug:
+        msg: "Docker Compose version: {{ compose_version.stdout }}"
 
     # -------------------------------------------------------------------------
     # Create Jenkins Directories
@@ -71,6 +135,7 @@
         mode: '0755'
       loop:
         - "{{ jenkins_home }}"
+        - "{{ jenkins_home }}/jobs"
         - "{{ jenkins_home }}/jobs/devops-testing-app"
         - "{{ jenkins_home }}/secrets"
         - "{{ jenkins_casc_dir }}"
@@ -169,19 +234,22 @@
     # Login to Docker Hub
     # -------------------------------------------------------------------------
     - name: Login to Docker Hub
-      docker_login:
+      community.docker.docker_login:
         username: "{{ docker_hub_username }}"
         password: "{{ docker_hub_token }}"
         registry_url: "https://index.docker.io/v1/"
       when: docker_hub_token | length > 0
+      ignore_errors: yes
 
     # -------------------------------------------------------------------------
     # Start Jenkins Container
     # -------------------------------------------------------------------------
     - name: Pull Jenkins image
-      docker_image:
+      community.docker.docker_image:
         name: jenkins/jenkins:lts-jdk17
         source: pull
+      retries: 3
+      delay: 10
 
     - name: Start Jenkins with Docker Compose
       community.docker.docker_compose_v2:
@@ -196,7 +264,7 @@
     # -------------------------------------------------------------------------
     # Wait for Jenkins to be Ready
     # -------------------------------------------------------------------------
-    - name: Wait for Jenkins to start
+    - name: Wait for Jenkins to start (up to 5 minutes)
       uri:
         url: "http://localhost:8080/login"
         method: GET
@@ -209,52 +277,51 @@
     # -------------------------------------------------------------------------
     # Install Tools in Jenkins Container
     # -------------------------------------------------------------------------
-    - name: Install Python in Jenkins container
+    - name: Install Python and tools in Jenkins container
       command: >
         docker exec -u root jenkins bash -c 
-        "apt-get update && apt-get install -y python3 python3-pip python3-venv && ln -sf /usr/bin/python3 /usr/bin/python || true"
+        "apt-get update && 
+         apt-get install -y python3 python3-pip python3-venv git curl jq &&
+         ln -sf /usr/bin/python3 /usr/bin/python || true"
       register: python_install
       changed_when: "'Setting up python3' in python_install.stdout"
       ignore_errors: yes
+      retries: 2
+      delay: 5
 
     - name: Install Docker CLI in Jenkins container
       command: >
         docker exec -u root jenkins bash -c 
-        "apt-get install -y docker.io && usermod -aG docker jenkins && chmod 666 /var/run/docker.sock"
-      register: docker_install
-      changed_when: "'Setting up docker' in docker_install.stdout"
+        "apt-get install -y docker.io && 
+         usermod -aG docker jenkins && 
+         chmod 666 /var/run/docker.sock"
+      register: docker_cli_install
+      changed_when: "'Setting up docker' in docker_cli_install.stdout"
       ignore_errors: yes
+      retries: 2
+      delay: 5
 
     - name: Verify Python installation in Jenkins
       command: docker exec jenkins python3 --version
-      register: python_version
+      register: python_version_jenkins
       changed_when: false
+      ignore_errors: yes
 
     - name: Verify Docker access in Jenkins
       command: docker exec jenkins docker --version
       register: docker_version_jenkins
       changed_when: false
+      ignore_errors: yes
 
     - name: Display tool versions
       debug:
         msg: |
-          Python in Jenkins: {{ python_version.stdout }}
-          Docker in Jenkins: {{ docker_version_jenkins.stdout }}
+          Python in Jenkins: {{ python_version_jenkins.stdout | default('Not installed') }}
+          Docker in Jenkins: {{ docker_version_jenkins.stdout | default('Not installed') }}
 
     # -------------------------------------------------------------------------
-    # Get Initial Admin Password (if CasC didn't set it)
+    # Display Jenkins Credentials
     # -------------------------------------------------------------------------
-    - name: Check if initial admin password exists
-      stat:
-        path: "{{ jenkins_home }}/secrets/initialAdminPassword"
-      register: initial_password_file
-
-    - name: Get Jenkins initial admin password
-      command: cat {{ jenkins_home }}/secrets/initialAdminPassword
-      register: jenkins_initial_password
-      when: initial_password_file.stat.exists
-      changed_when: false
-
     - name: Display Jenkins credentials
       debug:
         msg: |
@@ -263,9 +330,6 @@
           URL: http://{{ ansible_host }}:8080
           User: {{ jenkins_admin_user }}
           Password: {{ jenkins_admin_password }}
-          {% if jenkins_initial_password is defined and jenkins_initial_password.stdout is defined %}
-          Initial Password: {{ jenkins_initial_password.stdout }}
-          {% endif %}
           ============================================
 
   handlers:
