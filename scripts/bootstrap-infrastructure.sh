@@ -183,6 +183,34 @@ load_credentials_from_tfvars() {
     log_success "Loaded credentials from terraform.tfvars"
 }
 
+load_credentials_from_parameter_store() {
+    log_info "Checking for credentials in AWS Parameter Store..."
+    
+    # Try to get a parameter - if it exists, Parameter Store is set up
+    local test_param=$(aws ssm get-parameter --name "/devops/docker_hub_token" --with-decryption --query 'Parameter.Value' --output text 2>/dev/null || echo "")
+    
+    if [[ -z "$test_param" ]]; then
+        log_info "No credentials found in Parameter Store (using tfvars instead)"
+        return 1
+    fi
+    
+    log_success "Found credentials in Parameter Store - loading..."
+    
+    # Load all credentials from Parameter Store
+    export DOCKER_HUB_USERNAME=$(aws ssm get-parameter --name "/devops/docker_hub_username" --query 'Parameter.Value' --output text 2>/dev/null || echo "$DOCKER_HUB_USERNAME")
+    export DOCKER_HUB_TOKEN=$(aws ssm get-parameter --name "/devops/docker_hub_token" --with-decryption --query 'Parameter.Value' --output text 2>/dev/null || echo "$DOCKER_HUB_TOKEN")
+    export GITHUB_USERNAME=$(aws ssm get-parameter --name "/devops/github_username" --query 'Parameter.Value' --output text 2>/dev/null || echo "$GITHUB_USERNAME")
+    export GITHUB_TOKEN=$(aws ssm get-parameter --name "/devops/github_token" --with-decryption --query 'Parameter.Value' --output text 2>/dev/null || echo "$GITHUB_TOKEN")
+    export JIRA_URL=$(aws ssm get-parameter --name "/devops/jira_url" --query 'Parameter.Value' --output text 2>/dev/null || echo "$JIRA_URL")
+    export JIRA_EMAIL=$(aws ssm get-parameter --name "/devops/jira_email" --query 'Parameter.Value' --output text 2>/dev/null || echo "$JIRA_EMAIL")
+    export JIRA_API_TOKEN=$(aws ssm get-parameter --name "/devops/jira_api_token" --with-decryption --query 'Parameter.Value' --output text 2>/dev/null || echo "$JIRA_API_TOKEN")
+    export JENKINS_ADMIN_PASSWORD=$(aws ssm get-parameter --name "/devops/jenkins_password" --with-decryption --query 'Parameter.Value' --output text 2>/dev/null || echo "$JENKINS_ADMIN_PASSWORD")
+    export SSH_KEY_PATH=$(aws ssm get-parameter --name "/devops/ssh_key_path" --query 'Parameter.Value' --output text 2>/dev/null || echo "$SSH_KEY_PATH")
+    
+    log_success "Loaded credentials from Parameter Store"
+    return 0
+}
+
 check_prerequisites() {
     log_step "Checking Prerequisites"
     
@@ -200,6 +228,9 @@ check_prerequisites() {
     # Load credentials from .env file first, then tfvars
     load_env_file
     load_credentials_from_tfvars
+    
+    # Try to load from Parameter Store (will use tfvars values as fallback)
+    load_credentials_from_parameter_store || true
     
     # Check AWS credentials
     if [[ -z "$AWS_ACCESS_KEY_ID" || -z "$AWS_SECRET_ACCESS_KEY" ]]; then

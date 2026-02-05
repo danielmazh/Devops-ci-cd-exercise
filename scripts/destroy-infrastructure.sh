@@ -3,16 +3,17 @@
 # Destroy Infrastructure Script - COMPLETE CLEANUP
 # =============================================================================
 # Safely tears down ALL AWS infrastructure created by Terraform
-# Ensures no orphaned resources are left behind
+# Optionally deletes persistent storage (S3, Parameter Store, DynamoDB)
 #
 # Usage:
 #   ./destroy-infrastructure.sh [OPTIONS]
 #
 # Options:
-#   --force    Skip confirmation prompt
-#   --dry-run  Show what would be destroyed without executing
-#   --cleanup  Clean up orphaned resources not in state file
-#   --help     Show this help message
+#   --force           Skip confirmation prompt
+#   --dry-run         Show what would be destroyed without executing
+#   --cleanup         Clean up orphaned resources not in state file
+#   --delete-storage  Also delete S3 bucket, Parameter Store secrets, DynamoDB
+#   --help            Show this help message
 # =============================================================================
 
 set -euo pipefail
@@ -35,6 +36,7 @@ NC='\033[0m'
 FORCE=false
 DRY_RUN=false
 CLEANUP=false
+DELETE_STORAGE=false
 
 log_info() { echo -e "${BLUE}[INFO]${NC} $(date '+%H:%M:%S') $1"; }
 log_success() { echo -e "${GREEN}[SUCCESS]${NC} $(date '+%H:%M:%S') $1"; }
@@ -51,10 +53,11 @@ USAGE:
     $(basename "$0") [OPTIONS]
 
 OPTIONS:
-    --force     Skip confirmation prompt (DANGEROUS!)
-    --dry-run   Show what would be destroyed without executing
-    --cleanup   Also clean up orphaned AWS resources not in Terraform state
-    --help      Show this help message
+    --force           Skip confirmation prompt (DANGEROUS!)
+    --dry-run         Show what would be destroyed without executing
+    --cleanup         Also clean up orphaned AWS resources not in Terraform state
+    --delete-storage  Delete persistent storage (S3 bucket, Parameter Store, DynamoDB)
+    --help            Show this help message
 
 EXAMPLES:
     # Interactive destruction (with confirmation)
@@ -68,6 +71,14 @@ EXAMPLES:
     
     # Destroy + cleanup orphaned resources
     ./$(basename "$0") --cleanup
+    
+    # COMPLETE CLEANUP (everything including storage) - for end of course
+    ./$(basename "$0") --cleanup --delete-storage
+
+PERSISTENT STORAGE (only deleted with --delete-storage):
+    - S3 Bucket: Terraform state files (~\$0.001/month)
+    - Parameter Store: Encrypted credentials (FREE)
+    - DynamoDB Table: State locking (FREE)
 
 EOF
 }
@@ -86,7 +97,12 @@ load_aws_credentials() {
         exit 1
     fi
     
-    log_success "AWS credentials loaded"
+    # Get account ID
+    ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text 2>/dev/null || echo "unknown")
+    BUCKET_NAME="devops-tfstate-${ACCOUNT_ID}"
+    DYNAMODB_TABLE="devops-tfstate-lock"
+    
+    log_success "AWS credentials loaded (Account: $ACCOUNT_ID)"
 }
 
 get_resource_count() {
@@ -117,7 +133,6 @@ show_resources() {
 cleanup_orphaned_resources() {
     log_info "Cleaning up orphaned AWS resources..."
     
-    # Get project name from tfvars for filtering
     local project_name=$(grep -E "^project_name\s*=" "$TFVARS_FILE" | cut -d'"' -f2 || echo "devops-testing-app")
     
     log_info "Looking for resources tagged with project: $project_name"
@@ -158,26 +173,6 @@ cleanup_orphaned_resources() {
         fi
     else
         log_info "No orphaned EIPs found"
-    fi
-    
-    # Find and delete NAT Gateways
-    log_info "Checking for orphaned NAT Gateways..."
-    local nat_gws=$(aws ec2 describe-nat-gateways \
-        --filter "Name=tag:Project,Values=$project_name" "Name=state,Values=available,pending" \
-        --query 'NatGateways[].NatGatewayId' \
-        --output text 2>/dev/null || echo "")
-    
-    if [[ -n "$nat_gws" && "$nat_gws" != "None" ]]; then
-        log_warning "Found orphaned NAT Gateways: $nat_gws"
-        if [[ "$DRY_RUN" != true ]]; then
-            for nat in $nat_gws; do
-                aws ec2 delete-nat-gateway --nat-gateway-id "$nat" 2>/dev/null || true
-            done
-            sleep 30  # Wait for NAT gateway deletion
-            log_success "NAT Gateways deleted"
-        fi
-    else
-        log_info "No orphaned NAT Gateways found"
     fi
     
     # Find and delete Security Groups (non-default)
@@ -229,7 +224,6 @@ cleanup_orphaned_resources() {
         log_warning "Found orphaned Internet Gateways: $igws"
         if [[ "$DRY_RUN" != true ]]; then
             for igw in $igws; do
-                # First detach from VPC
                 local vpc=$(aws ec2 describe-internet-gateways \
                     --internet-gateway-ids "$igw" \
                     --query 'InternetGateways[].Attachments[].VpcId' \
@@ -256,7 +250,6 @@ cleanup_orphaned_resources() {
         log_warning "Found orphaned VPCs: $vpcs"
         if [[ "$DRY_RUN" != true ]]; then
             for vpc in $vpcs; do
-                # Delete route tables (except main)
                 local rts=$(aws ec2 describe-route-tables \
                     --filters "Name=vpc-id,Values=$vpc" \
                     --query 'RouteTables[?Associations[0].Main!=`true`].RouteTableId' \
@@ -264,7 +257,6 @@ cleanup_orphaned_resources() {
                 for rt in $rts; do
                     aws ec2 delete-route-table --route-table-id "$rt" 2>/dev/null || true
                 done
-                
                 aws ec2 delete-vpc --vpc-id "$vpc" 2>/dev/null || true
             done
             log_success "VPCs deleted"
@@ -274,6 +266,180 @@ cleanup_orphaned_resources() {
     fi
     
     log_success "Orphaned resource cleanup complete"
+}
+
+delete_persistent_storage() {
+    echo ""
+    echo "╔══════════════════════════════════════════════════════════════════════════════╗"
+    echo "║              ⚠️  PERSISTENT STORAGE DELETION ⚠️                               ║"
+    echo "╚══════════════════════════════════════════════════════════════════════════════╝"
+    echo ""
+    echo "  This will DELETE the following resources:"
+    echo ""
+    echo "  📦 S3 Bucket: $BUCKET_NAME"
+    echo "     Contains: Terraform state files"
+    echo "     Impact: State history will be PERMANENTLY LOST"
+    echo "     Cost saved: ~\$0.001/month"
+    echo ""
+    echo "  🔒 Parameter Store Secrets:"
+    echo "     /devops/docker_hub_username"
+    echo "     /devops/docker_hub_token"
+    echo "     /devops/github_username"
+    echo "     /devops/github_token"
+    echo "     /devops/jira_url"
+    echo "     /devops/jira_email"
+    echo "     /devops/jira_api_token"
+    echo "     /devops/jenkins_password"
+    echo "     /devops/ssh_key_path"
+    echo "     Impact: You'll need to re-enter credentials"
+    echo "     Cost saved: \$0 (already FREE)"
+    echo ""
+    echo "  🔐 DynamoDB Table: $DYNAMODB_TABLE"
+    echo "     Contains: Terraform state locks"
+    echo "     Impact: Lock history lost (no practical impact)"
+    echo "     Cost saved: \$0 (FREE tier)"
+    echo ""
+    
+    if [[ "$DRY_RUN" == true ]]; then
+        log_info "[DRY-RUN] Would delete all persistent storage"
+        return 0
+    fi
+    
+    if [[ "$FORCE" != true ]]; then
+        echo -e "${YELLOW}  ⚠️  This action CANNOT be undone!${NC}"
+        echo ""
+        read -p "  Type 'DELETE ALL' to confirm: " confirm
+        
+        if [[ "$confirm" != "DELETE ALL" ]]; then
+            log_info "Storage deletion cancelled"
+            return 0
+        fi
+    fi
+    
+    echo ""
+    log_info "Deleting persistent storage..."
+    
+    # Delete S3 bucket (must empty first)
+    log_info "Deleting S3 bucket: $BUCKET_NAME"
+    if aws s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
+        # Empty the bucket (including versions)
+        aws s3api list-object-versions --bucket "$BUCKET_NAME" --query 'Versions[].{Key:Key,VersionId:VersionId}' --output json 2>/dev/null | \
+            jq -r '.[] | "--key \"\(.Key)\" --version-id \"\(.VersionId)\""' 2>/dev/null | \
+            while read -r args; do
+                eval "aws s3api delete-object --bucket $BUCKET_NAME $args" 2>/dev/null || true
+            done
+        
+        # Delete delete markers
+        aws s3api list-object-versions --bucket "$BUCKET_NAME" --query 'DeleteMarkers[].{Key:Key,VersionId:VersionId}' --output json 2>/dev/null | \
+            jq -r '.[] | "--key \"\(.Key)\" --version-id \"\(.VersionId)\""' 2>/dev/null | \
+            while read -r args; do
+                eval "aws s3api delete-object --bucket $BUCKET_NAME $args" 2>/dev/null || true
+            done
+        
+        # Delete bucket
+        aws s3 rb "s3://$BUCKET_NAME" --force 2>/dev/null || true
+        log_success "S3 bucket deleted"
+    else
+        log_info "S3 bucket not found (already deleted or never created)"
+    fi
+    
+    # Delete Parameter Store secrets
+    log_info "Deleting Parameter Store secrets..."
+    local params=(
+        "/devops/docker_hub_username"
+        "/devops/docker_hub_token"
+        "/devops/github_username"
+        "/devops/github_token"
+        "/devops/jira_url"
+        "/devops/jira_email"
+        "/devops/jira_api_token"
+        "/devops/jenkins_password"
+        "/devops/ssh_key_path"
+    )
+    
+    for param in "${params[@]}"; do
+        if aws ssm get-parameter --name "$param" 2>/dev/null; then
+            aws ssm delete-parameter --name "$param" 2>/dev/null || true
+            log_info "  ✓ Deleted: $param"
+        fi
+    done
+    log_success "Parameter Store secrets deleted"
+    
+    # Delete DynamoDB table
+    log_info "Deleting DynamoDB table: $DYNAMODB_TABLE"
+    if aws dynamodb describe-table --table-name "$DYNAMODB_TABLE" 2>/dev/null; then
+        aws dynamodb delete-table --table-name "$DYNAMODB_TABLE" 2>/dev/null || true
+        aws dynamodb wait table-not-exists --table-name "$DYNAMODB_TABLE" 2>/dev/null || true
+        log_success "DynamoDB table deleted"
+    else
+        log_info "DynamoDB table not found (already deleted or never created)"
+    fi
+    
+    # Remove backend.tf to switch back to local state
+    if [[ -f "$TERRAFORM_DIR/backend.tf" ]]; then
+        rm -f "$TERRAFORM_DIR/backend.tf"
+        log_info "Removed backend.tf (switched back to local state)"
+    fi
+    
+    log_success "All persistent storage deleted!"
+    echo ""
+    echo "  💰 Total ongoing AWS costs: \$0.00/month"
+    echo ""
+}
+
+ask_about_storage() {
+    if [[ "$DELETE_STORAGE" == true ]]; then
+        return 0  # Already set via command line
+    fi
+    
+    # Check if storage exists
+    local storage_exists=false
+    
+    if aws s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
+        storage_exists=true
+    fi
+    
+    if aws ssm get-parameter --name "/devops/docker_hub_token" 2>/dev/null >/dev/null; then
+        storage_exists=true
+    fi
+    
+    if [[ "$storage_exists" == false ]]; then
+        return 1  # No storage to delete
+    fi
+    
+    echo ""
+    echo "╔══════════════════════════════════════════════════════════════════════════════╗"
+    echo "║                    Persistent Storage Detected                                ║"
+    echo "╚══════════════════════════════════════════════════════════════════════════════╝"
+    echo ""
+    echo "  The following persistent storage exists in AWS:"
+    echo ""
+    echo "  📦 S3 Bucket: $BUCKET_NAME (Terraform state)"
+    echo "  🔒 Parameter Store: /devops/* (Credentials)"
+    echo "  🔐 DynamoDB: $DYNAMODB_TABLE (State locking)"
+    echo ""
+    echo "  Options:"
+    echo "    [K]eep  - Keep storage for future deployments (recommended if continuing course)"
+    echo "    [D]elete - Delete ALL storage (recommended at END of course to avoid any costs)"
+    echo ""
+    
+    if [[ "$FORCE" == true ]]; then
+        log_info "Force mode: keeping storage (use --delete-storage to delete)"
+        return 1
+    fi
+    
+    read -p "  Do you want to delete persistent storage? [K/D]: " choice
+    
+    case "${choice,,}" in
+        d|delete)
+            DELETE_STORAGE=true
+            return 0
+            ;;
+        *)
+            log_info "Keeping persistent storage"
+            return 1
+            ;;
+    esac
 }
 
 destroy() {
@@ -288,58 +454,74 @@ destroy() {
     # Initialize terraform if needed
     if [[ ! -d ".terraform" ]]; then
         log_info "Initializing Terraform..."
-        terraform init -upgrade
+        terraform init -upgrade 2>/dev/null || terraform init
     fi
     
     # Show current resources
     local resource_count=$(get_resource_count)
-    log_warning "This will destroy $resource_count resources!"
-    echo ""
     
-    show_resources
+    if [[ "$resource_count" == "0" ]]; then
+        log_info "No infrastructure resources to destroy"
+    else
+        log_warning "This will destroy $resource_count resources!"
+        echo ""
+        show_resources
+    fi
     
     if [[ "$DRY_RUN" == true ]]; then
         log_info "[DRY-RUN] Showing destruction plan..."
-        terraform plan -destroy
-        log_info "[DRY-RUN] No changes made."
+        if [[ "$resource_count" != "0" ]]; then
+            terraform plan -destroy
+        fi
         
         if [[ "$CLEANUP" == true ]]; then
             cleanup_orphaned_resources
         fi
         
+        if [[ "$DELETE_STORAGE" == true ]]; then
+            delete_persistent_storage
+        fi
+        
+        log_info "[DRY-RUN] No changes made."
         return 0
     fi
     
-    if [[ "$FORCE" != true ]]; then
-        echo ""
-        log_warning "This action CANNOT be undone!"
-        log_warning "All EC2 instances, EIPs, VPCs, and other resources will be permanently deleted."
-        echo ""
-        read -p "Type 'destroy' to confirm: " confirm
-        
-        if [[ "$confirm" != "destroy" ]]; then
-            log_info "Destruction cancelled."
-            exit 0
+    if [[ "$resource_count" != "0" ]]; then
+        if [[ "$FORCE" != true ]]; then
+            echo ""
+            log_warning "This action CANNOT be undone!"
+            echo ""
+            read -p "Type 'destroy' to confirm: " confirm
+            
+            if [[ "$confirm" != "destroy" ]]; then
+                log_info "Destruction cancelled."
+                exit 0
+            fi
+        else
+            log_warning "Force mode enabled - skipping confirmation"
         fi
-    else
-        log_warning "Force mode enabled - skipping confirmation"
-    fi
-    
-    echo ""
-    log_info "Destroying infrastructure (this may take 3-5 minutes)..."
-    
-    # Run terraform destroy
-    terraform destroy -auto-approve
-    local tf_result=$?
-    
-    if [[ $tf_result -ne 0 ]]; then
-        log_error "Terraform destroy had errors. Attempting cleanup of orphaned resources..."
-        CLEANUP=true
+        
+        echo ""
+        log_info "Destroying infrastructure (this may take 3-5 minutes)..."
+        
+        # Run terraform destroy
+        terraform destroy -auto-approve
+        local tf_result=$?
+        
+        if [[ $tf_result -ne 0 ]]; then
+            log_error "Terraform destroy had errors. Attempting cleanup of orphaned resources..."
+            CLEANUP=true
+        fi
     fi
     
     # Cleanup orphaned resources if requested or if destroy had errors
     if [[ "$CLEANUP" == true ]]; then
         cleanup_orphaned_resources
+    fi
+    
+    # Ask about persistent storage
+    if ask_about_storage; then
+        delete_persistent_storage
     fi
     
     # Clean up local state files
@@ -355,15 +537,34 @@ destroy() {
 ║                         Infrastructure Destroyed                              ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
-  All AWS resources have been terminated.
-  Local Terraform state has been cleaned up.
+  All AWS EC2/VPC resources have been terminated.
+EOF
+
+    if [[ "$DELETE_STORAGE" == true ]]; then
+        cat << EOF
+  All persistent storage (S3, Parameter Store, DynamoDB) has been deleted.
   
-  To verify cleanup, run:
-    aws ec2 describe-instances --filters "Name=tag:Project,Values=devops-testing-app"
-    aws ec2 describe-vpcs --filters "Name=tag:Project,Values=devops-testing-app"
+  💰 Total ongoing AWS costs: \$0.00/month
+EOF
+    else
+        cat << EOF
+  
+  ℹ️  Persistent storage was KEPT:
+      - S3 Bucket: $BUCKET_NAME
+      - Parameter Store: /devops/*
+      - DynamoDB: $DYNAMODB_TABLE
+      
+  💰 Ongoing cost: ~\$0.001/month (essentially free)
+  
+  To delete storage later, run:
+      ./scripts/destroy-infrastructure.sh --delete-storage
+EOF
+    fi
+    
+    cat << EOF
   
   To recreate the infrastructure, run:
-    ./scripts/bootstrap-infrastructure.sh
+      ./scripts/bootstrap-infrastructure.sh
 
 EOF
 }
@@ -381,6 +582,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --cleanup)
             CLEANUP=true
+            shift
+            ;;
+        --delete-storage)
+            DELETE_STORAGE=true
             shift
             ;;
         --help|-h)
