@@ -12,38 +12,119 @@
 
 ## 📋 Table of Contents
 
-- [Overview](#overview)
+- [The Big Picture](#the-big-picture)
+- [How It All Works Together](#how-it-all-works-together)
 - [Architecture](#architecture)
 - [Prerequisites](#prerequisites)
 - [Quick Start](#quick-start)
-- [Detailed Setup Guide](#detailed-setup-guide)
-- [Infrastructure Components](#infrastructure-components)
+- [AWS Cloud Storage](#aws-cloud-storage)
 - [Jenkins Pipeline](#jenkins-pipeline)
-- [Configuration](#configuration)
+- [Daily Workflow](#daily-workflow)
+- [Commands Reference](#commands-reference)
 - [Troubleshooting](#troubleshooting)
-- [Cleanup](#cleanup)
-- [Contributing](#contributing)
+- [Cost Management](#cost-management)
 
 ---
 
-## 🎯 Overview
+## 🎯 The Big Picture
 
-This project provides a **fully automated, production-ready CI/CD infrastructure** that can be deployed to AWS with a single command. It includes:
+This project demonstrates a **complete, production-ready DevOps workflow** where:
 
-- **Jenkins** - CI/CD automation server with pre-configured pipeline
-- **Docker** - Containerized application and build environment
-- **Terraform** - Infrastructure as Code for AWS resources
-- **Ansible** - Configuration management and server provisioning
-- **Flask Application** - Sample Python web application with tests
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                           THE BIG PICTURE                                        │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│   YOU (Developer)                                                                │
+│      │                                                                           │
+│      ▼                                                                           │
+│   ┌─────────────┐    git push     ┌─────────────┐                               │
+│   │   Code      │ ──────────────► │   GitHub    │                               │
+│   │   Changes   │                 │   Repo      │                               │
+│   └─────────────┘                 └──────┬──────┘                               │
+│                                          │                                       │
+│                                          │ webhook                               │
+│                                          ▼                                       │
+│   ┌─────────────────────────────────────────────────────────────────────────┐   │
+│   │                         AWS CLOUD                                        │   │
+│   │  ┌───────────────────────────────────────────────────────────────────┐  │   │
+│   │  │              Parameter Store (FREE - Secure Secrets)              │  │   │
+│   │  │  /devops/docker_hub_token  /devops/github_token  /devops/jira_*   │  │   │
+│   │  └───────────────────────────────────────────────────────────────────┘  │   │
+│   │                                    │                                     │   │
+│   │                                    ▼ fetches secrets                     │   │
+│   │  ┌─────────────────────┐    ┌─────────────────────┐                     │   │
+│   │  │   Jenkins Server    │    │    App Server       │                     │   │
+│   │  │   (t3.large)        │    │    (t3.micro)       │                     │   │
+│   │  │                     │    │                     │                     │   │
+│   │  │  • Run Tests        │    │  • Flask App        │                     │   │
+│   │  │  • Build Docker     │───►│  • Docker           │                     │   │
+│   │  │  • Push to Hub      │    │  • Health Checks    │                     │   │
+│   │  │  • Deploy App       │    │                     │                     │   │
+│   │  └─────────────────────┘    └─────────────────────┘                     │   │
+│   │            │                                                             │   │
+│   │            │ pushes image                                                │   │
+│   │            ▼                                                             │   │
+│   │  ┌─────────────────────┐    ┌─────────────────────┐                     │   │
+│   │  │   S3 Bucket         │    │   DynamoDB Table    │                     │   │
+│   │  │   (Terraform State) │    │   (State Locking)   │                     │   │
+│   │  └─────────────────────┘    └─────────────────────┘                     │   │
+│   └─────────────────────────────────────────────────────────────────────────┘   │
+│                                          │                                       │
+│                                          ▼                                       │
+│   ┌─────────────┐                 ┌─────────────┐                               │
+│   │ Docker Hub  │                 │    JIRA     │ ◄── Creates issues on failure │
+│   │ (Registry)  │                 │  (Tracking) │                               │
+│   └─────────────┘                 └─────────────┘                               │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
 
-### Key Features
+---
 
-✅ **One-Command Deployment** - Deploy entire infrastructure with `./scripts/bootstrap-infrastructure.sh`  
-✅ **Complete CI/CD Pipeline** - Unit tests, integration tests, code quality, Docker build & push  
-✅ **Infrastructure as Code** - All infrastructure defined in Terraform  
-✅ **Configuration Management** - Server configuration automated with Ansible  
-✅ **Security Best Practices** - Proper IAM roles, security groups, and credential management  
-✅ **Full Cleanup** - Destroy everything with `./scripts/destroy-infrastructure.sh`  
+## 🔄 How It All Works Together
+
+### 1️⃣ Infrastructure Provisioning (Terraform)
+```
+terraform.tfvars ──► Terraform ──► Creates AWS Resources
+                                   • VPC, Subnets, IGW
+                                   • Security Groups
+                                   • EC2 Instances (Jenkins + App)
+                                   • Elastic IPs
+                                   • IAM Roles
+```
+
+### 2️⃣ Server Configuration (Ansible)
+```
+Ansible Playbooks ──► SSH to EC2 ──► Configures Servers
+                                     • Installs Docker
+                                     • Installs Docker Compose
+                                     • Starts Jenkins container
+                                     • Sets up credentials
+                                     • Creates pipeline job
+```
+
+### 3️⃣ CI/CD Pipeline (Jenkins)
+```
+Code Push ──► Jenkins Pipeline ──► Automated Workflow
+                                   • Checkout code
+                                   • Run unit tests
+                                   • Run integration tests
+                                   • Code quality checks
+                                   • Build Docker image
+                                   • Push to Docker Hub
+                                   • Deploy to App server
+```
+
+### 4️⃣ Secrets Management (AWS Parameter Store)
+```
+Parameter Store (FREE) ──► Securely Stores ──► All Credentials
+                                               • Docker Hub token
+                                               • GitHub token
+                                               • JIRA API token
+                                               • Jenkins password
+                                               • SSH key path
+```
 
 ---
 
@@ -61,30 +142,64 @@ This project provides a **fully automated, production-ready CI/CD infrastructure
 │  │  │  ┌─────────────────┐   │  │  ┌─────────────────┐   │           │   │
 │  │  │  │ Jenkins Server  │   │  │  │   App Server    │   │           │   │
 │  │  │  │ (t3.large)      │   │  │  │   (t3.micro)    │   │           │   │
+│  │  │  │ 2 vCPU, 8GB RAM │   │  │  │ 2 vCPU, 1GB RAM │   │           │   │
 │  │  │  │                 │   │  │  │                 │   │           │   │
-│  │  │  │ - Jenkins       │   │  │  │ - Docker        │   │           │   │
-│  │  │  │ - Docker        │   │  │  │ - Flask App     │   │           │   │
-│  │  │  │ - Ansible       │   │  │  │                 │   │           │   │
-│  │  │  │ - AWS CLI       │   │  │  │                 │   │           │   │
-│  │  │  └─────────────────┘   │  │  └─────────────────┘   │           │   │
-│  │  │         ↓ EIP          │  │         ↓ EIP          │           │   │
-│  │  └─────────────────────────┘  └─────────────────────────┘           │   │
-│  │                                                                     │   │
-│  │  ┌─────────────────────────────────────────────────────────────┐   │   │
-│  │  │                    Internet Gateway                          │   │   │
-│  │  └─────────────────────────────────────────────────────────────┘   │   │
+│  │  │  │ • Jenkins       │   │  │  │ • Docker        │   │           │   │
+│  │  │  │ • Docker        │   │  │  │ • Flask App     │   │           │   │
+│  │  │  │ • Python        │   │  │  │                 │   │           │   │
+│  │  │  └────────┬────────┘   │  │  └────────┬────────┘   │           │   │
+│  │  │           │ EIP        │  │           │ EIP        │           │   │
+│  │  └───────────┼────────────┘  └───────────┼────────────┘           │   │
+│  │              │                           │                         │   │
+│  │  ┌───────────┴───────────────────────────┴───────────────────┐    │   │
+│  │  │                    Internet Gateway                        │    │   │
+│  │  └───────────────────────────────────────────────────────────┘    │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                             │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │                    PERSISTENT STORAGE (stays after destroy)          │   │
+│  │  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐  │   │
+│  │  │ Parameter Store  │  │   S3 Bucket      │  │  DynamoDB Table  │  │   │
+│  │  │ (Secrets - FREE) │  │ (TF State ~$0)   │  │ (Lock - FREE)    │  │   │
+│  │  └──────────────────┘  └──────────────────┘  └──────────────────┘  │   │
 │  └─────────────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           External Services                                  │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐        │
-│  │  GitHub     │  │ Docker Hub  │  │    JIRA     │  │   Email     │        │
-│  │  (Source)   │  │  (Registry) │  │  (Issues)   │  │(Notifications)│       │
-│  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘        │
-└─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## 🔐 AWS Cloud Storage
+
+All credentials are stored securely in **AWS Parameter Store** (FREE tier):
+
+### Stored Secrets (16 parameters)
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `/devops/docker_hub_username` | String | Docker Hub username |
+| `/devops/docker_hub_token` | 🔐 SecureString | Docker Hub access token |
+| `/devops/github_username` | String | GitHub username |
+| `/devops/github_token` | 🔐 SecureString | GitHub personal access token |
+| `/devops/github_repo` | String | Repository name |
+| `/devops/jira_url` | String | JIRA base URL |
+| `/devops/jira_email` | String | JIRA email |
+| `/devops/jira_api_token` | 🔐 SecureString | JIRA API token |
+| `/devops/jira_project_key` | String | JIRA project key |
+| `/devops/jenkins_admin_user` | String | Jenkins admin username |
+| `/devops/jenkins_password` | 🔐 SecureString | Jenkins admin password |
+| `/devops/aws_region` | String | AWS region |
+| `/devops/aws_account_id` | String | AWS account ID |
+| `/devops/ssh_key_path` | String | Local SSH key path |
+| `/devops/ssh_key_name` | String | AWS key pair name |
+| `/devops/notification_email` | String | Email for notifications |
+
+### Storage Resources
+
+| Resource | Name | Purpose | Cost |
+|----------|------|---------|------|
+| **S3 Bucket** | `devops-tfstate-632008729195` | Terraform state | ~$0.001/month |
+| **DynamoDB** | `devops-tfstate-lock` | State locking | FREE |
+| **Parameter Store** | `/devops/*` | Secrets | FREE |
 
 ---
 
@@ -92,262 +207,59 @@ This project provides a **fully automated, production-ready CI/CD infrastructure
 
 ### Required Software
 
-| Tool | Version | Installation |
-|------|---------|--------------|
-| Terraform | >= 1.0.0 | [Install Guide](https://developer.hashicorp.com/terraform/tutorials/aws-get-started/install-cli) |
-| Ansible | >= 2.9 | `pip install ansible` or `brew install ansible` |
-| AWS CLI | >= 2.0 | [Install Guide](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) |
-| jq | >= 1.6 | `brew install jq` or `apt install jq` |
-| nc (netcat) | - | Usually pre-installed on macOS/Linux |
-
-### Required Accounts & Credentials
-
-| Service | What You Need | How to Get It |
-|---------|---------------|---------------|
-| **AWS** | Access Key ID + Secret Key | [IAM Console](https://console.aws.amazon.com/iam/) → Users → Security Credentials |
-| **Docker Hub** | Personal Access Token | [Docker Hub](https://hub.docker.com/settings/security) → New Access Token |
-| **GitHub** | Personal Access Token (optional) | [GitHub Tokens](https://github.com/settings/tokens) → Generate new token |
-| **JIRA** | API Token (optional) | [Atlassian API Tokens](https://id.atlassian.com/manage-profile/security/api-tokens) |
-
-### AWS Permissions Required
-
-The AWS IAM user needs the following permissions:
-- `EC2FullAccess`
-- `VPCFullAccess`
-- `IAMFullAccess` (for instance profiles)
-- Or use `AdministratorAccess` for simplicity
-
-### SSH Key Pair
-
-You need an AWS EC2 key pair:
-
 ```bash
-# Option 1: Create via AWS Console
-# Go to EC2 → Key Pairs → Create Key Pair → Download .pem file
-
-# Option 2: Import existing key
-aws ec2 import-key-pair \
-    --key-name "your-key-name" \
-    --public-key-material fileb://~/.ssh/id_rsa.pub
+# Check all prerequisites
+terraform version    # >= 1.0.0
+ansible --version    # >= 2.9
+aws --version        # >= 2.0
+jq --version         # >= 1.6
 ```
+
+### Required Files
+
+| File | Location | Purpose |
+|------|----------|---------|
+| SSH Key | `/Users/danielmazmazhbits/keys/devops-key-private-account.pem` | EC2 access |
+| Terraform vars | `infrastructure/terraform/terraform.tfvars` | AWS credentials |
 
 ---
 
 ## 🚀 Quick Start
 
-### 1. Clone the Repository
+### First Time Setup (One-time only)
 
 ```bash
+# 1. Clone the repository
 git clone https://github.com/danielmazh/devops-ci-cd-exercise.git
 cd devops-ci-cd-exercise
+
+# 2. Set up AWS cloud storage (creates S3, DynamoDB, Parameter Store)
+./scripts/setup-aws-storage.sh
+
+# 3. Initialize Terraform with S3 backend
+cd infrastructure/terraform
+terraform init -migrate-state
+cd ../..
 ```
 
-### 2. Configure Credentials
-
-Edit `infrastructure/terraform/terraform.tfvars`:
-
-```hcl
-# AWS Credentials
-aws_region     = "us-east-1"
-aws_access_key = "YOUR_AWS_ACCESS_KEY"
-aws_secret_key = "YOUR_AWS_SECRET_KEY"
-
-# SSH Key
-key_name             = "your-key-name"
-ssh_private_key_path = "/path/to/your/key.pem"
-
-# Docker Hub
-docker_hub_username = "your-docker-username"
-docker_hub_token    = "dckr_pat_xxxxx"
-
-# GitHub (optional)
-github_username = "your-github-username"
-github_token    = "ghp_xxxxx"
-
-# JIRA (optional)
-jira_url       = "https://your-domain.atlassian.net"
-jira_email     = "your-email@example.com"
-jira_api_token = "your-jira-token"
-```
-
-### 3. Deploy Everything
+### Deploy Infrastructure
 
 ```bash
+# Single command to deploy everything
 ./scripts/bootstrap-infrastructure.sh
 ```
 
-**Expected Output:**
-```
-╔══════════════════════════════════════════════════════════════════════════════╗
-║                    DevOps CI/CD Infrastructure Bootstrap                      ║
-╚══════════════════════════════════════════════════════════════════════════════╝
+**Expected time: ~10-15 minutes**
 
-[SUCCESS] All prerequisites met!
-[INFO] Running Terraform...
-[INFO] Applying infrastructure (this may take 3-5 minutes)...
-[SUCCESS] Jenkins IP: 34.xxx.xxx.xxx
-[SUCCESS] App IP: 3.xxx.xxx.xxx
-[INFO] Running Ansible Configuration...
-[SUCCESS] Jenkins setup completed
-[SUCCESS] App setup completed
-[SUCCESS] Jenkins is accessible at http://34.xxx.xxx.xxx:8080
+### Access Services
 
-╔══════════════════════════════════════════════════════════════════════════════╗
-║                         🎉 DEPLOYMENT COMPLETE! 🎉                            ║
-╚══════════════════════════════════════════════════════════════════════════════╝
+After deployment:
 
-  📍 Jenkins URL:     http://34.xxx.xxx.xxx:8080
-  📍 App URL:         http://3.xxx.xxx.xxx
-  
-  🔑 Jenkins Credentials:
-     Username: admin
-     Password: DevOps2026!
-```
-
-### 4. Access Jenkins
-
-1. Open `http://<JENKINS_IP>:8080` in your browser
-2. Login with:
-   - **Username:** `admin`
-   - **Password:** `DevOps2026!`
-3. Navigate to the `devops-testing-app` pipeline job
-4. Click **"Build Now"** to run the pipeline
-
----
-
-## 📖 Detailed Setup Guide
-
-### Step 1: Verify Prerequisites
-
-```bash
-# Check all required tools are installed
-terraform version
-ansible --version
-aws --version
-jq --version
-
-# Verify AWS credentials
-aws sts get-caller-identity
-```
-
-### Step 2: Configure terraform.tfvars
-
-Create or edit `infrastructure/terraform/terraform.tfvars`:
-
-```hcl
-# =============================================================================
-# AWS Configuration
-# =============================================================================
-aws_region     = "us-east-1"
-aws_access_key = "AKIAXXXXXXXXXXXXXXXX"
-aws_secret_key = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-
-# =============================================================================
-# Project Configuration
-# =============================================================================
-project_name = "devops-testing-app"
-environment  = "staging"
-owner_email  = "your-email@example.com"
-
-# =============================================================================
-# EC2 Configuration
-# =============================================================================
-jenkins_instance_type = "t3.large"     # 2 vCPU, 8GB RAM (recommended)
-jenkins_volume_size   = 30
-
-app_instance_type = "t3.micro"         # 2 vCPU, 1GB RAM
-app_volume_size   = 30
-
-# SSH Key (MUST exist in AWS)
-key_name             = "your-key-name"
-ssh_private_key_path = "/path/to/your/key.pem"
-
-# =============================================================================
-# Docker Hub Credentials
-# =============================================================================
-docker_hub_username = "your-dockerhub-username"
-docker_hub_token    = "dckr_pat_xxxxxxxxxxxxxxxxxxxxxxxxx"
-docker_image_name   = "devops-testing-app"
-
-# =============================================================================
-# GitHub Configuration (optional - for private repos)
-# =============================================================================
-github_username = "your-github-username"
-github_token    = "ghp_xxxxxxxxxxxxxxxxxxxxxxxxx"
-github_repo     = "devops-ci-cd-exercise"
-
-# =============================================================================
-# JIRA Configuration (optional - for issue tracking)
-# =============================================================================
-jira_url         = "https://your-domain.atlassian.net"
-jira_email       = "your-email@example.com"
-jira_api_token   = "your-jira-api-token"
-jira_project_key = "CICD"
-
-# =============================================================================
-# Jenkins Configuration
-# =============================================================================
-jenkins_admin_user     = "admin"
-jenkins_admin_password = "DevOps2026!"
-```
-
-### Step 3: Deploy Infrastructure
-
-```bash
-# Full deployment (Terraform + Ansible)
-./scripts/bootstrap-infrastructure.sh
-
-# Preview what will be created (dry-run)
-./scripts/bootstrap-infrastructure.sh --dry-run
-
-# Skip Terraform (only run Ansible on existing infra)
-./scripts/bootstrap-infrastructure.sh --skip-terraform
-
-# Skip Ansible (only create AWS resources)
-./scripts/bootstrap-infrastructure.sh --skip-ansible
-```
-
-### Step 4: Run the Pipeline
-
-1. Access Jenkins at `http://<JENKINS_IP>:8080`
-2. Login with your credentials
-3. Click on `devops-testing-app` job
-4. Click **"Build with Parameters"**
-5. Optionally enable:
-   - `RUN_PERFORMANCE_TESTS` - Run Locust performance tests
-   - `DEPLOY_TO_STAGING` - Deploy to staging server
-   - `DEPLOY_TO_PRODUCTION` - Deploy to production (requires approval)
-6. Click **"Build"**
-
----
-
-## 🔧 Infrastructure Components
-
-### AWS Resources Created
-
-| Resource | Count | Description |
-|----------|-------|-------------|
-| VPC | 1 | Virtual Private Cloud (10.0.0.0/16) |
-| Subnets | 2 | Public subnets in different AZs |
-| Internet Gateway | 1 | Internet access for public subnets |
-| Route Tables | 1 | Public route table with IGW |
-| Security Groups | 2 | Jenkins SG + App SG |
-| EC2 Instances | 2 | Jenkins server + App server |
-| Elastic IPs | 2 | Static IPs for both servers |
-| IAM Roles | 2 | Instance profiles for EC2 |
-| VPC Endpoint | 1 | S3 endpoint for private access |
-
-### Security Groups
-
-**Jenkins Security Group:**
-- Port 22 (SSH) - Your IP only
-- Port 8080 (Jenkins UI) - Anywhere
-- Port 50000 (Jenkins Agent) - VPC only
-
-**App Security Group:**
-- Port 22 (SSH) - Your IP only
-- Port 80 (HTTP) - Anywhere
-- Port 5000 (Flask) - VPC only
+| Service | URL | Credentials |
+|---------|-----|-------------|
+| **Jenkins** | `http://<JENKINS_IP>:8080` | admin / DevOps2026! |
+| **App** | `http://<APP_IP>` | N/A |
+| **Pipeline** | `devops-testing-app` job | Pre-configured |
 
 ---
 
@@ -356,81 +268,147 @@ jenkins_admin_password = "DevOps2026!"
 ### Pipeline Stages
 
 ```
-┌──────────────────┐
-│ Setup Environment│ → Create Python venv, install dependencies
-└────────┬─────────┘
-         ▼
-┌──────────────────┐
-│   Code Quality   │ → Flake8, Pylint, Bandit (parallel)
-└────────┬─────────┘
-         ▼
-┌──────────────────┐
-│   Unit Tests     │ → pytest with coverage (MANDATORY)
-└────────┬─────────┘
-         ▼
-┌──────────────────┐
-│Integration Tests │ → API tests with Flask client (MANDATORY)
-└────────┬─────────┘
-         ▼
-┌──────────────────┐
-│    E2E Tests     │ → Selenium tests (SKIPPED in CI)
-└────────┬─────────┘
-         ▼
-┌──────────────────┐
-│Performance Tests │ → Locust load tests (OPTIONAL)
-└────────┬─────────┘
-         ▼
-┌──────────────────┐
-│Build Docker Image│ → Multi-stage Docker build
-└────────┬─────────┘
-         ▼
-┌──────────────────┐
-│Push to Docker Hub│ → Push tagged image to registry
-└────────┬─────────┘
-         ▼
-┌──────────────────┐
-│Deploy to Staging │ → Ansible deployment (OPTIONAL)
-└────────┬─────────┘
-         ▼
-┌──────────────────┐
-│Deploy to Prod    │ → Manual approval + deployment (OPTIONAL)
-└──────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        JENKINS PIPELINE FLOW                                 │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌──────────────┐                                                           │
+│  │    START     │                                                           │
+│  └──────┬───────┘                                                           │
+│         ▼                                                                    │
+│  ┌──────────────┐   Create Python venv, install dependencies                │
+│  │    Setup     │──────────────────────────────────────────────►           │
+│  └──────┬───────┘                                                           │
+│         ▼                                                                    │
+│  ┌──────────────┐   Flake8, Pylint, Bandit (parallel)                       │
+│  │ Code Quality │──────────────────────────────────────────────►           │
+│  └──────┬───────┘                                                           │
+│         ▼                                                                    │
+│  ┌──────────────┐   pytest with coverage (MANDATORY - must pass)            │
+│  │  Unit Tests  │──────────────────────────────────────────────►           │
+│  └──────┬───────┘                                                           │
+│         ▼                                                                    │
+│  ┌──────────────┐   API tests (MANDATORY - must pass)                       │
+│  │ Integration  │──────────────────────────────────────────────►           │
+│  └──────┬───────┘                                                           │
+│         ▼                                                                    │
+│  ┌──────────────┐   Multi-stage Docker build                                │
+│  │ Docker Build │──────────────────────────────────────────────►           │
+│  └──────┬───────┘                                                           │
+│         ▼                                                                    │
+│  ┌──────────────┐   Push to Docker Hub (danielmazh/devops-testing-app)      │
+│  │  Push Image  │──────────────────────────────────────────────►           │
+│  └──────┬───────┘                                                           │
+│         ▼                                                                    │
+│  ┌──────────────┐   Deploy via SSH/Ansible (optional)                       │
+│  │   Deploy     │──────────────────────────────────────────────►           │
+│  └──────┬───────┘                                                           │
+│         ▼                                                                    │
+│  ┌──────────────┐                                                           │
+│  │   SUCCESS    │   ◄── Email notification                                  │
+│  └──────────────┘                                                           │
+│                                                                              │
+│  On FAILURE: ──► Create JIRA issue + Email notification                     │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Pipeline Features
+### Test Reports
 
-- **Parallel Execution** - Code quality checks run in parallel
-- **Test Reports** - JUnit XML + HTML reports published to Jenkins
-- **Code Coverage** - Coverage reports with threshold enforcement
-- **Docker Build** - Multi-stage builds with build args
-- **Artifact Management** - All reports archived
-- **Failure Handling** - JIRA issue creation + email notifications
+Jenkins displays:
+- ✅ Unit test results (JUnit)
+- ✅ Code coverage report (HTML)
+- ✅ Integration test report (HTML)
+- ✅ Archived artifacts
 
 ---
 
-## ⚙️ Configuration
+## 📅 Daily Workflow
 
-### Environment Variables
-
-You can use environment variables instead of `terraform.tfvars`:
-
-```bash
-export AWS_ACCESS_KEY_ID="your-access-key"
-export AWS_SECRET_ACCESS_KEY="your-secret-key"
-export DOCKER_HUB_TOKEN="your-docker-token"
-export GITHUB_TOKEN="your-github-token"
-export SSH_KEY_PATH="/path/to/your/key.pem"
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     RECOMMENDED WORKFLOW                         │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  🌅 START OF DAY (or study session)                             │
+│     │                                                            │
+│     └──► ./scripts/bootstrap-infrastructure.sh                   │
+│          • Fetches credentials from Parameter Store              │
+│          • Creates EC2 instances                                 │
+│          • Configures Jenkins                                    │
+│          • ~10-15 minutes                                        │
+│                                                                  │
+│  💻 DURING THE DAY                                              │
+│     │                                                            │
+│     └──► Work on exercises                                       │
+│          • Push code to GitHub                                   │
+│          • Jenkins runs pipeline automatically                   │
+│          • View results at http://<JENKINS_IP>:8080              │
+│                                                                  │
+│  🌙 END OF DAY (save money!)                                    │
+│     │                                                            │
+│     └──► ./scripts/destroy-infrastructure.sh                     │
+│          • Choose [K] to KEEP storage                            │
+│          • Destroys EC2 instances only                           │
+│          • Credentials stay in Parameter Store                   │
+│          • State saved in S3                                     │
+│                                                                  │
+│  🎓 END OF COURSE (zero cost)                                   │
+│     │                                                            │
+│     └──► ./scripts/destroy-infrastructure.sh --delete-storage    │
+│          • Type 'DELETE ALL' to confirm                          │
+│          • Deletes EVERYTHING including storage                  │
+│          • $0.00/month ongoing cost                              │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-### Jenkins Configuration as Code (CasC)
+---
 
-Jenkins is configured automatically using CasC at:
-- `infrastructure/ansible/roles/jenkins/templates/jenkins-casc.yaml.j2`
+## 🎮 Commands Reference
 
-### Ansible Inventory
+### Infrastructure Commands
 
-Auto-generated at:
-- `infrastructure/ansible/inventory/staging.ini`
+| Command | Description |
+|---------|-------------|
+| `./scripts/bootstrap-infrastructure.sh` | Deploy everything |
+| `./scripts/bootstrap-infrastructure.sh --dry-run` | Preview without changes |
+| `./scripts/bootstrap-infrastructure.sh --skip-terraform` | Only run Ansible |
+| `./scripts/destroy-infrastructure.sh` | Destroy infra (keep storage) |
+| `./scripts/destroy-infrastructure.sh --delete-storage` | Destroy EVERYTHING |
+| `./scripts/setup-aws-storage.sh` | Set up S3/DynamoDB/Params |
+
+### AWS Commands (Verification)
+
+```bash
+# List all stored parameters
+aws ssm describe-parameters --query 'Parameters[?starts_with(Name, `/devops/`)].Name'
+
+# Get a specific parameter
+aws ssm get-parameter --name "/devops/docker_hub_username" --query 'Parameter.Value'
+
+# Get encrypted parameter
+aws ssm get-parameter --name "/devops/docker_hub_token" --with-decryption --query 'Parameter.Value'
+
+# List S3 buckets
+aws s3 ls | grep devops
+
+# Check DynamoDB table
+aws dynamodb describe-table --table-name devops-tfstate-lock
+```
+
+### SSH Commands
+
+```bash
+# Connect to Jenkins server
+ssh -i /Users/danielmazmazhbits/keys/devops-key-private-account.pem ec2-user@<JENKINS_IP>
+
+# Connect to App server
+ssh -i /Users/danielmazmazhbits/keys/devops-key-private-account.pem ec2-user@<APP_IP>
+
+# View Jenkins logs
+ssh -i <KEY> ec2-user@<JENKINS_IP> "docker logs jenkins"
+```
 
 ---
 
@@ -438,102 +416,55 @@ Auto-generated at:
 
 ### Common Issues
 
-#### 1. "AWS credentials not configured"
+| Issue | Solution |
+|-------|----------|
+| "AWS credentials not configured" | Check `terraform.tfvars` has correct keys |
+| "SSH key not found" | Verify path: `/Users/.../keys/devops-key-private-account.pem` |
+| "Jenkins not accessible" | Wait 2-3 minutes after deployment, check security group |
+| "Pipeline fails at Docker push" | Verify Docker Hub token in Parameter Store |
+| "Terraform state lock" | Run `terraform force-unlock <LOCK_ID>` |
+
+### Debug Commands
 
 ```bash
-# Verify credentials
-aws sts get-caller-identity
-
-# Check terraform.tfvars has correct values
-cat infrastructure/terraform/terraform.tfvars | grep aws_
-```
-
-#### 2. "SSH key not found"
-
-```bash
-# Verify key exists
-ls -la /path/to/your/key.pem
-
-# Verify key permissions
-chmod 400 /path/to/your/key.pem
-```
-
-#### 3. "Jenkins not accessible after deployment"
-
-```bash
-# SSH into Jenkins server
-ssh -i /path/to/key.pem ec2-user@<JENKINS_IP>
-
 # Check Jenkins container
-docker ps
-docker logs jenkins
+ssh -i <KEY> ec2-user@<JENKINS_IP> "docker ps && docker logs jenkins --tail 50"
 
-# Check if Jenkins is listening
-curl http://localhost:8080/login
-```
-
-#### 4. "Docker permission denied in Jenkins"
-
-```bash
-# SSH into Jenkins server
-ssh -i /path/to/key.pem ec2-user@<JENKINS_IP>
-
-# Fix docker socket permissions
-docker exec -u root jenkins bash -c "chmod 666 /var/run/docker.sock"
-```
-
-#### 5. "Terraform state lock"
-
-```bash
-# Force unlock (use with caution)
-cd infrastructure/terraform
-terraform force-unlock <LOCK_ID>
-```
-
-### Viewing Logs
-
-```bash
-# Bootstrap script logs
+# Check Ansible logs
 cat /tmp/ansible-jenkins.log
-cat /tmp/ansible-app.log
 
-# Jenkins container logs
-ssh -i /path/to/key.pem ec2-user@<JENKINS_IP> "docker logs jenkins"
-
-# Terraform debug
-TF_LOG=DEBUG terraform apply
+# Verify AWS resources
+aws ec2 describe-instances --filters "Name=tag:Project,Values=devops-testing-app"
 ```
 
 ---
 
-## 🗑️ Cleanup
+## 💰 Cost Management
 
-### Destroy All Resources
+### Cost Breakdown
+
+| State | Resources | Monthly Cost |
+|-------|-----------|--------------|
+| **Running** | EC2 (Jenkins t3.large + App t3.micro) + EIP + Storage | ~$70-80/month |
+| **Stopped** | Only persistent storage | ~$0.001/month |
+| **Deleted** | Nothing | $0.00/month |
+
+### Cost Optimization Tips
+
+1. **Destroy at end of each day** - Only pay for hours used
+2. **Use `--delete-storage` at end of course** - Zero ongoing costs
+3. **t3.large is recommended** - Faster builds save time
+
+### Verify Zero Cost
+
+After `--delete-storage`:
 
 ```bash
-# Complete destruction with confirmation
-./scripts/destroy-infrastructure.sh
-
-# Force destroy (no confirmation)
-./scripts/destroy-infrastructure.sh --force
-
-# Destroy + cleanup orphaned resources
-./scripts/destroy-infrastructure.sh --cleanup
-
-# Preview what will be destroyed
-./scripts/destroy-infrastructure.sh --dry-run
-```
-
-### Manual Verification
-
-```bash
-# Verify no resources remain
-aws ec2 describe-instances \
-    --filters "Name=tag:Project,Values=devops-testing-app" \
-    --query 'Reservations[].Instances[].{ID:InstanceId,State:State.Name}'
-
-aws ec2 describe-vpcs \
-    --filters "Name=tag:Project,Values=devops-testing-app"
+# Should return empty results
+aws ec2 describe-instances --filters "Name=tag:Project,Values=devops-testing-app"
+aws s3 ls | grep devops-tfstate
+aws ssm describe-parameters --query 'Parameters[?starts_with(Name, `/devops/`)]'
+aws dynamodb list-tables | grep devops
 ```
 
 ---
@@ -546,88 +477,50 @@ devops-ci-cd-exercise/
 │   ├── __init__.py              # App factory
 │   └── routes/                  # API endpoints
 ├── docker/                       # Docker configurations
-│   ├── Dockerfile               # Multi-stage app Dockerfile
-│   └── docker-compose.yml       # Local development
+│   └── Dockerfile               # Multi-stage build
 ├── infrastructure/
 │   ├── terraform/               # Infrastructure as Code
-│   │   ├── main.tf             # Provider configuration
-│   │   ├── variables.tf        # Variable definitions
-│   │   ├── terraform.tfvars    # Variable values (SENSITIVE)
-│   │   ├── vpc.tf              # VPC resources
-│   │   ├── security_groups.tf  # Security groups
-│   │   ├── jenkins.tf          # Jenkins EC2 instance
-│   │   ├── app.tf              # App EC2 instance
-│   │   ├── iam.tf              # IAM roles & policies
-│   │   └── outputs.tf          # Output values
+│   │   ├── main.tf             # Provider config
+│   │   ├── backend.tf          # S3 backend (auto-generated)
+│   │   ├── terraform.tfvars    # Your credentials (gitignored)
+│   │   └── *.tf                # Resource definitions
 │   └── ansible/                 # Configuration management
-│       ├── ansible.cfg         # Ansible configuration
-│       ├── inventory/          # Host inventories
-│       ├── playbooks/          # Ansible playbooks
-│       │   ├── jenkins-setup.yml
-│       │   ├── app-setup.yml
-│       │   └── deploy-app.yml
-│       ├── roles/              # Ansible roles
-│       │   ├── jenkins/
-│       │   └── docker-app/
-│       └── group_vars/         # Group variables
+│       ├── playbooks/          # Setup playbooks
+│       └── roles/              # Ansible roles
 ├── jenkins/
-│   ├── Jenkinsfile             # Main pipeline definition
-│   └── plugins.txt             # Required plugins
+│   └── Jenkinsfile             # Pipeline definition
 ├── scripts/
 │   ├── bootstrap-infrastructure.sh   # Deploy everything
 │   ├── destroy-infrastructure.sh     # Cleanup everything
-│   ├── build-and-push.sh            # Build & push Docker
-│   └── health-check.sh              # Health verification
+│   └── setup-aws-storage.sh         # Setup cloud storage
 ├── tests/
 │   ├── unit/                   # Unit tests
 │   ├── integration/            # Integration tests
-│   ├── e2e/                    # End-to-end tests
-│   └── performance/            # Performance tests
-├── requirements.txt            # Python dependencies
-├── pytest.ini                 # Pytest configuration
-├── env.template               # Environment template
-└── README.md                  # This file
+│   └── e2e/                    # End-to-end tests
+└── README.md                   # This file
 ```
 
 ---
 
-## 🔐 Security Notes
+## ✅ Checklist
 
-1. **Never commit** `terraform.tfvars` or `.env` files
-2. **Rotate credentials** after testing
-3. **Restrict SSH access** to your IP only in production
-4. **Use IAM roles** instead of access keys in production
-5. **Enable S3 versioning** for Terraform state in production
+### Initial Setup (One-time)
+- [x] AWS account with IAM user
+- [x] SSH key pair created in AWS
+- [x] `terraform.tfvars` configured
+- [x] Cloud storage set up (`setup-aws-storage.sh`)
+- [x] Terraform initialized with S3 backend
 
----
+### Each Deployment
+- [ ] Run `./scripts/bootstrap-infrastructure.sh`
+- [ ] Access Jenkins at `http://<IP>:8080`
+- [ ] Run the pipeline
+- [ ] Run `./scripts/destroy-infrastructure.sh` when done
 
-## 📊 Cost Estimation
-
-| Resource | Type | Monthly Cost (us-east-1) |
-|----------|------|-------------------------|
-| Jenkins EC2 | t3.large | ~$60 |
-| App EC2 | t3.micro | ~$8 |
-| Elastic IPs | 2x | ~$7 (when not attached) |
-| EBS Volumes | 60GB total | ~$6 |
-| **Total** | | **~$75-80/month** |
-
-> 💡 **Tip:** Destroy infrastructure when not in use to save costs!
-
----
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
----
-
-## 📝 License
-
-This project is for educational purposes as part of DevOps training.
+### End of Course
+- [ ] Run `./scripts/destroy-infrastructure.sh --delete-storage`
+- [ ] Verify zero resources remain
+- [ ] Rotate/delete AWS access keys
 
 ---
 
@@ -641,6 +534,8 @@ This project is for educational purposes as part of DevOps training.
 
 <div align="center">
 
-**⭐ Star this repo if you found it helpful! ⭐**
+**Built for DevOps Training - Lesson 47**
+
+🚀 **One command. Complete CI/CD. Production ready.** 🚀
 
 </div>
