@@ -45,12 +45,12 @@
           - python3-pip
           - git
           - jq
-          - curl
         state: present
       register: pkg_result
       retries: 3
       delay: 10
       until: pkg_result is succeeded
+      # Note: curl is provided by curl-minimal on Amazon Linux 2023
 
     # -------------------------------------------------------------------------
     # Install Docker (if not already installed by cloud-init)
