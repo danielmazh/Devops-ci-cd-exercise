@@ -64,6 +64,7 @@ terraform.rc
 # Ansible
 *.retry
 /tmp/ansible_facts_cache/
+infrastructure/ansible/inventory/staging.ini
 
 # Secrets (NEVER commit)
 *.pem

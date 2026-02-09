@@ -1,9 +1,20 @@
 # =============================================================================
 # Jenkins Plugins List - PRODUCTION READY
 # =============================================================================
-# These plugins are installed automatically by Jenkins on startup
+# These plugins are installed via jenkins-plugin-cli after Jenkins starts
+# Order matters - dependencies should come before dependents
+
+# Core Framework (REQUIRED - these must be first)
+structs
+workflow-step-api
+workflow-api
+workflow-support
+scm-api
+workflow-scm-step
 
 # Core Pipeline (REQUIRED)
+workflow-job
+workflow-cps
 workflow-aggregator
 pipeline-stage-view
 pipeline-graph-view
@@ -11,6 +22,9 @@ pipeline-build-step
 pipeline-utility-steps
 pipeline-milestone-step
 pipeline-model-definition
+pipeline-model-api
+pipeline-model-extensions
+pipeline-groovy-lib
 
 # Git Integration (REQUIRED)
 git
@@ -42,7 +56,7 @@ cobertura
 htmlpublisher
 warnings-ng
 
-# Notifications (OPTIONAL but recommended)
+# Notifications (REQUIRED)
 email-ext
 mailer
 

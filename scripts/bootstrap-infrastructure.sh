@@ -541,48 +541,56 @@ install_jenkins_plugins() {
         return
     fi
     
-    log_info "Installing critical Jenkins plugins..."
+    log_info "Installing critical Jenkins plugins via jenkins-plugin-cli..."
     
     # Wait a bit for Jenkins to fully initialize
     sleep 30
     
-    # List of critical plugins to verify/install
-    local plugins=(
-        "workflow-aggregator"
-        "pipeline-stage-view"
-        "git"
-        "github"
-        "docker-workflow"
-        "credentials-binding"
-        "junit"
-        "htmlpublisher"
-        "email-ext"
-        "configuration-as-code"
-        "job-dsl"
-        "ws-cleanup"
-        "timestamper"
-        "ansicolor"
-        "http_request"
-    )
-    
-    # Install plugins via CLI
+    # Install plugins using jenkins-plugin-cli (more reliable than jenkins-cli.jar)
+    # This uses the built-in plugin installer that handles dependencies automatically
     ssh -i "$SSH_KEY_PATH" -o StrictHostKeyChecking=no ec2-user@$JENKINS_IP << 'ENDSSH'
-# Download Jenkins CLI
-docker exec jenkins curl -sO http://localhost:8080/jnlpJars/jenkins-cli.jar -o /tmp/jenkins-cli.jar 2>/dev/null || true
+echo "Installing Jenkins plugins with jenkins-plugin-cli..."
 
-# Install plugins
-for plugin in workflow-aggregator pipeline-stage-view git github docker-workflow credentials-binding junit htmlpublisher email-ext configuration-as-code job-dsl ws-cleanup timestamper ansicolor http_request; do
-    echo "Installing plugin: $plugin"
-    docker exec jenkins java -jar /tmp/jenkins-cli.jar -s http://localhost:8080 -auth admin:DevOps2026! install-plugin $plugin -deploy 2>/dev/null || true
-done
+# Core framework plugins (order matters - dependencies first)
+docker exec jenkins jenkins-plugin-cli --plugins \
+    structs \
+    workflow-step-api \
+    workflow-api \
+    workflow-support \
+    scm-api \
+    workflow-scm-step \
+    workflow-job \
+    workflow-cps \
+    workflow-aggregator \
+    pipeline-model-definition \
+    pipeline-model-api \
+    pipeline-model-extensions \
+    pipeline-groovy-lib \
+    pipeline-stage-view \
+    pipeline-utility-steps \
+    git \
+    git-client \
+    github \
+    docker-workflow \
+    credentials-binding \
+    junit \
+    htmlpublisher \
+    email-ext \
+    configuration-as-code \
+    job-dsl \
+    ws-cleanup \
+    timestamper \
+    ansicolor \
+    http_request \
+    ssh-agent \
+    ssh-credentials
 
-# Restart Jenkins to activate plugins
-echo "Restarting Jenkins to activate plugins..."
+echo "Plugins installed. Restarting Jenkins to activate..."
 docker restart jenkins
 ENDSSH
     
-    log_info "Waiting for Jenkins restart (60s)..."
-    sleep 60
+    log_info "Waiting for Jenkins restart (90s)..."
+    sleep 90
     
     # Wait for Jenkins to be ready again
     wait_for_jenkins

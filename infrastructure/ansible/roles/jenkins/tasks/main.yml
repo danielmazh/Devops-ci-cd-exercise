@@ -135,6 +135,28 @@
   ignore_errors: yes
 
 # -----------------------------------------------------------------------------
+# Install Browser Dependencies for E2E Tests
+# -----------------------------------------------------------------------------
+- name: Install Firefox and Xvfb for E2E tests
+  command: >
+    docker exec -u root jenkins bash -c 
+    "apt-get update && apt-get install -y firefox-esr xvfb libgtk-3-0 libdbus-glib-1-2 libxt6 libx11-xcb1"
+  register: firefox_install
+  changed_when: "'Setting up firefox' in firefox_install.stdout"
+  ignore_errors: yes
+
+- name: Install GeckoDriver for Selenium
+  command: >
+    docker exec -u root jenkins bash -c 
+    "wget -q https://github.com/mozilla/geckodriver/releases/download/v0.34.0/geckodriver-v0.34.0-linux64.tar.gz -O /tmp/geckodriver.tar.gz &&
+     tar -xzf /tmp/geckodriver.tar.gz -C /usr/local/bin &&
+     chmod +x /usr/local/bin/geckodriver &&
+     rm /tmp/geckodriver.tar.gz"
+  register: geckodriver_install
+  changed_when: geckodriver_install.rc == 0
+  ignore_errors: yes
+
+# -----------------------------------------------------------------------------
 # Wait for Jenkins to be Ready
 # -----------------------------------------------------------------------------
 - name: Wait for Jenkins to be ready
@@ -145,3 +167,34 @@
   until: result.status == 200
   retries: 30
   delay: 10
+
+# -----------------------------------------------------------------------------
+# Install Jenkins Plugins
+# -----------------------------------------------------------------------------
+- name: Install Jenkins plugins via jenkins-plugin-cli
+  command: >
+    docker exec jenkins jenkins-plugin-cli --plugins
+    structs workflow-step-api workflow-api workflow-support scm-api workflow-scm-step
+    workflow-job workflow-cps workflow-aggregator pipeline-model-definition
+    pipeline-model-api pipeline-model-extensions pipeline-groovy-lib pipeline-stage-view
+    pipeline-utility-steps git git-client github docker-workflow credentials-binding
+    junit htmlpublisher email-ext configuration-as-code job-dsl ws-cleanup
+    timestamper ansicolor http_request ssh-agent ssh-credentials
+  register: plugin_install
+  changed_when: "'Done' in plugin_install.stdout or plugin_install.rc == 0"
+  retries: 2
+  delay: 10
+
+- name: Restart Jenkins to load plugins
+  command: docker restart jenkins
+  when: plugin_install.changed
+
+- name: Wait for Jenkins after plugin restart
+  uri:
+    url: "http://localhost:{{ jenkins_port }}/login"
+    status_code: 200
+  register: result_after_plugins
+  until: result_after_plugins.status == 200
+  retries: 30
+  delay: 10
+  when: plugin_install.changed

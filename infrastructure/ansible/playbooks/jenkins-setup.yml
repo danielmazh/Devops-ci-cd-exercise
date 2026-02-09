@@ -364,6 +364,63 @@
           GeckoDriver in Jenkins: {{ geckodriver_version_jenkins.stdout | default('Not installed') }}
 
     # -------------------------------------------------------------------------
+    # Install Jenkins Plugins (Critical for Pipeline)
+    # -------------------------------------------------------------------------
+    - name: Install Jenkins plugins via jenkins-plugin-cli
+      command: >
+        docker exec jenkins jenkins-plugin-cli --plugins
+        structs
+        workflow-step-api
+        workflow-api
+        workflow-support
+        scm-api
+        workflow-scm-step
+        workflow-job
+        workflow-cps
+        workflow-aggregator
+        pipeline-model-definition
+        pipeline-model-api
+        pipeline-model-extensions
+        pipeline-groovy-lib
+        pipeline-stage-view
+        pipeline-utility-steps
+        git
+        git-client
+        github
+        docker-workflow
+        credentials-binding
+        junit
+        htmlpublisher
+        email-ext
+        configuration-as-code
+        job-dsl
+        ws-cleanup
+        timestamper
+        ansicolor
+        http_request
+        ssh-agent
+        ssh-credentials
+      register: plugin_install
+      changed_when: "'Done' in plugin_install.stdout or plugin_install.rc == 0"
+      retries: 2
+      delay: 10
+
+    - name: Restart Jenkins to load plugins
+      command: docker restart jenkins
+      when: plugin_install.changed
+
+    - name: Wait for Jenkins to restart after plugin install
+      uri:
+        url: "http://localhost:8080/login"
+        method: GET
+        status_code: 200
+      register: jenkins_restart_health
+      until: jenkins_restart_health.status == 200
+      retries: 30
+      delay: 10
+      when: plugin_install.changed
+
+    # -------------------------------------------------------------------------
     # Display Jenkins Credentials
     # -------------------------------------------------------------------------
     - name: Display Jenkins credentials
