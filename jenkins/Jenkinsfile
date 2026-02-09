@@ -19,6 +19,7 @@ pipeline {
         booleanParam(name: 'RUN_E2E_TESTS', defaultValue: true, description: 'Run E2E tests (Selenium + Firefox headless)')
         booleanParam(name: 'DEPLOY_TO_STAGING', defaultValue: false, description: 'Deploy to staging environment')
         booleanParam(name: 'DEPLOY_TO_PRODUCTION', defaultValue: false, description: 'Deploy to production environment')
+        booleanParam(name: 'CREATE_JIRA_ON_SUCCESS', defaultValue: false, description: 'Create JIRA ticket on successful build with build summary')
     }
     
     environment {
@@ -441,6 +442,12 @@ pipeline {
             script {
                 echo "✅ Pipeline completed successfully!"
                 
+                // Create JIRA Issue on success if checkbox is checked
+                def jiraIssueKey = null
+                if (params.CREATE_JIRA_ON_SUCCESS == true) {
+                    jiraIssueKey = createJiraSuccessIssue()
+                }
+                
                 // Email notification
                 emailext(
                     subject: "✅ Build SUCCESS: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
@@ -452,6 +459,7 @@ pipeline {
                             <tr><td><strong>Branch</strong></td><td>${env.BRANCH_NAME ?: 'N/A'}</td></tr>
                             <tr><td><strong>Version</strong></td><td>${VERSION_TAG}</td></tr>
                             <tr><td><strong>Duration</strong></td><td>${currentBuild.durationString}</td></tr>
+                            ${jiraIssueKey ? "<tr><td><strong>JIRA Issue</strong></td><td><a href='https://danielmaz.atlassian.net/browse/${jiraIssueKey}'>${jiraIssueKey}</a></td></tr>" : ''}
                         </table>
                         <p><a href="${env.BUILD_URL}">View Build Details</a></p>
                         <p><a href="${env.BUILD_URL}Code_20Coverage_20Report/">View Coverage Report</a></p>
@@ -552,6 +560,80 @@ def createJiraIssue() {
         }
     } catch (Exception e) {
         echo "Failed to create JIRA issue: ${e.message}"
+        return null
+    }
+}
+
+def createJiraSuccessIssue() {
+    try {
+        withCredentials([usernamePassword(
+            credentialsId: 'jira-credentials',
+            usernameVariable: 'JIRA_USER',
+            passwordVariable: 'JIRA_TOKEN'
+        )]) {
+            def summary = "✅ Build Success: ${env.JOB_NAME} #${env.BUILD_NUMBER}"
+            def description = """
+                h2. Build Success Summary
+                
+                The CI/CD pipeline completed successfully!
+                
+                h3. Build Details
+                ||Field||Value||
+                |Job Name|${env.JOB_NAME}|
+                |Build Number|#${env.BUILD_NUMBER}|
+                |Branch|${env.BRANCH_NAME ?: 'main'}|
+                |Version Tag|${VERSION_TAG}|
+                |Duration|${currentBuild.durationString}|
+                |Build URL|[View Build|${env.BUILD_URL}]|
+                
+                h3. Git Information
+                * Commit: ${env.GIT_COMMIT ?: 'N/A'}
+                * Short Commit: ${GIT_COMMIT_SHORT ?: 'N/A'}
+                
+                h3. Tests Executed
+                * Unit Tests: ✅ Passed
+                * Integration Tests: ✅ Passed
+                * E2E Tests: ${params.RUN_E2E_TESTS ? '✅ Passed' : '⏭️ Skipped'}
+                * Performance Tests: ${params.RUN_PERFORMANCE_TESTS ? '✅ Passed' : '⏭️ Skipped'}
+                
+                h3. Artifacts
+                * Docker Image: ${DOCKER_IMAGE}:${VERSION_TAG}
+                * [Coverage Report|${env.BUILD_URL}Code_20Coverage_20Report/]
+                * [Test Report|${env.BUILD_URL}testReport/]
+                
+                h3. Deployment Status
+                * Deploy to Staging: ${params.DEPLOY_TO_STAGING ? '✅ Deployed' : '⏭️ Skipped'}
+                * Deploy to Production: ${params.DEPLOY_TO_PRODUCTION ? '✅ Deployed' : '⏭️ Skipped'}
+            """
+            
+            def payload = """
+            {
+                "fields": {
+                    "project": {"key": "${JIRA_PROJECT_KEY}"},
+                    "summary": "${summary}",
+                    "description": ${groovy.json.JsonOutput.toJson(description)},
+                    "issuetype": {"name": "Task"},
+                    "priority": {"name": "Low"},
+                    "labels": ["jenkins", "automated", "build-success", "ci-cd"]
+                }
+            }
+            """
+            
+            def response = httpRequest(
+                url: "https://danielmaz.atlassian.net/rest/api/3/issue",
+                httpMode: 'POST',
+                contentType: 'APPLICATION_JSON',
+                requestBody: payload,
+                authentication: 'jira-credentials',
+                validResponseCodes: '201'
+            )
+            
+            def json = readJSON text: response.content
+            echo "Created JIRA success issue: ${json.key}"
+            return json.key
+        }
+    } catch (Exception e) {
+        echo "Failed to create JIRA success issue: ${e.message}"
         return null
     }
 }
