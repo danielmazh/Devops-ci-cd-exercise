@@ -4,6 +4,41 @@
 # NOTE: Simplified CasC to avoid compatibility issues with plugins
 # Job is created separately via config.xml file
 
+# -----------------------------------------------------------------------------
+# Credentials
+# -----------------------------------------------------------------------------
+credentials:
+  system:
+    domainCredentials:
+      - credentials:
+{% if jira_email is defined and jira_api_token is defined and jira_api_token %}
+          # JIRA Credentials (for issue creation on build failure)
+          - usernamePassword:
+              id: "jira-credentials"
+              username: "{{ jira_email }}"
+              password: "{{ jira_api_token }}"
+              description: "JIRA API credentials for automated issue creation"
+              scope: GLOBAL
+{% endif %}
+{% if docker_hub_username is defined and docker_hub_token is defined and docker_hub_token %}
+          # Docker Hub Credentials
+          - usernamePassword:
+              id: "docker-hub-credentials"
+              username: "{{ docker_hub_username }}"
+              password: "{{ docker_hub_token }}"
+              description: "Docker Hub credentials for image push"
+              scope: GLOBAL
+{% endif %}
+{% if github_username is defined and github_token is defined and github_token %}
+          # GitHub Credentials
+          - usernamePassword:
+              id: "github-credentials"
+              username: "{{ github_username }}"
+              password: "{{ github_token }}"
+              description: "GitHub credentials for repository access"
+              scope: GLOBAL
+{% endif %}
+
 jenkins:
   systemMessage: "DevOps Testing App - CI/CD Pipeline ({{ environment }})"
   numExecutors: 4
