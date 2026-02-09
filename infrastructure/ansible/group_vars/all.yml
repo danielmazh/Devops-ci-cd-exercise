@@ -48,6 +48,9 @@ smtp_port: "587"
 smtp_username: "{{ lookup('env', 'SMTP_USERNAME') | default('', true) }}"
 smtp_password: "{{ lookup('env', 'SMTP_PASSWORD') | default('', true) }}"
 
+# SSH Private Key (base64 encoded) for Jenkins deployment credential
+ssh_private_key_b64: "{{ lookup('env', 'SSH_PRIVATE_KEY_B64') | default('', true) }}"
+
 # -----------------------------------------------------------------------------
 # SSH Settings
 # -----------------------------------------------------------------------------

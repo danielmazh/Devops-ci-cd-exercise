@@ -166,6 +166,12 @@ store_secrets() {
     store_parameter "/devops/jenkins_password" "$jenkins_password" "Jenkins admin password" "SecureString"
     store_parameter "/devops/ssh_key_path" "$ssh_key_path" "SSH key path"
     
+    # Store SSH private key content (base64 encoded) for Jenkins deployment credential
+    if [[ -n "$ssh_key_path" && -f "$ssh_key_path" ]]; then
+        local ssh_key_b64=$(cat "$ssh_key_path" | base64)
+        store_parameter "/devops/ssh_private_key" "$ssh_key_b64" "SSH private key (base64)" "SecureString"
+    fi
+    
     # SMTP/Email parameters
     store_parameter "/devops/smtp_host" "$smtp_host" "SMTP server hostname"
     store_parameter "/devops/smtp_port" "$smtp_port" "SMTP server port"
@@ -245,6 +251,7 @@ print_summary() {
     echo "     /devops/jira_api_token (encrypted)"
     echo "     /devops/jenkins_password (encrypted)"
     echo "     /devops/ssh_key_path"
+    echo "     /devops/ssh_private_key (encrypted, base64)"
     echo "     /devops/smtp_host"
     echo "     /devops/smtp_port"
     echo "     /devops/smtp_username"

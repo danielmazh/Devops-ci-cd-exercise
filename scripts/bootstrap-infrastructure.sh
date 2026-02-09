@@ -213,6 +213,9 @@ load_credentials_from_parameter_store() {
     export JENKINS_ADMIN_PASSWORD=$(aws ssm get-parameter --name "/devops/jenkins_password" --with-decryption --query 'Parameter.Value' --output text 2>/dev/null || echo "$JENKINS_ADMIN_PASSWORD")
     export SSH_KEY_PATH=$(aws ssm get-parameter --name "/devops/ssh_key_path" --query 'Parameter.Value' --output text 2>/dev/null || echo "$SSH_KEY_PATH")
     
+    # Load SSH private key content (base64 encoded) for Jenkins credential
+    export SSH_PRIVATE_KEY_B64=$(aws ssm get-parameter --name "/devops/ssh_private_key" --with-decryption --query 'Parameter.Value' --output text 2>/dev/null || echo "")
+    
     # Load SMTP/Email credentials
     export SMTP_HOST=$(aws ssm get-parameter --name "/devops/smtp_host" --query 'Parameter.Value' --output text 2>/dev/null || echo "$SMTP_HOST")
     export SMTP_PORT=$(aws ssm get-parameter --name "/devops/smtp_port" --query 'Parameter.Value' --output text 2>/dev/null || echo "$SMTP_PORT")
@@ -473,6 +476,7 @@ run_ansible() {
         "smtp_port=$SMTP_PORT"
         "smtp_username=$SMTP_USERNAME"
         "smtp_password=$SMTP_PASSWORD"
+        "ssh_private_key_b64=$SSH_PRIVATE_KEY_B64"
     )
     
     # Setup Jenkins

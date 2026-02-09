@@ -38,6 +38,17 @@ credentials:
               description: "GitHub credentials for repository access"
               scope: GLOBAL
 {% endif %}
+{% if ssh_private_key_b64 is defined and ssh_private_key_b64 %}
+          # AWS SSH Key (for deployment)
+          - basicSSHUserPrivateKey:
+              id: "aws-ssh-key"
+              username: "ec2-user"
+              description: "AWS EC2 SSH key for deployment"
+              scope: GLOBAL
+              privateKeySource:
+                directEntry:
+                  privateKey: "{{ ssh_private_key_b64 | b64decode }}"
+{% endif %}
 
 jenkins:
   systemMessage: "DevOps Testing App - CI/CD Pipeline ({{ environment }})"
