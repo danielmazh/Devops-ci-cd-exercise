@@ -180,6 +180,12 @@ load_credentials_from_tfvars() {
     # Export notification email
     export NOTIFICATION_EMAIL=$(grep -E "^owner_email\s*=" "$tfvars" | cut -d'"' -f2 || echo "")
     
+    # Export SMTP/Email credentials
+    export SMTP_HOST=$(grep -E "^smtp_host\s*=" "$tfvars" | cut -d'"' -f2 || echo "smtp.gmail.com")
+    export SMTP_PORT=$(grep -E "^smtp_port\s*=" "$tfvars" | cut -d'"' -f2 || echo "587")
+    export SMTP_USERNAME=$(grep -E "^smtp_username\s*=" "$tfvars" | cut -d'"' -f2 || echo "")
+    export SMTP_PASSWORD=$(grep -E "^smtp_password\s*=" "$tfvars" | cut -d'"' -f2 || echo "")
+    
     log_success "Loaded credentials from terraform.tfvars"
 }
 
@@ -206,6 +212,12 @@ load_credentials_from_parameter_store() {
     export JIRA_API_TOKEN=$(aws ssm get-parameter --name "/devops/jira_api_token" --with-decryption --query 'Parameter.Value' --output text 2>/dev/null || echo "$JIRA_API_TOKEN")
     export JENKINS_ADMIN_PASSWORD=$(aws ssm get-parameter --name "/devops/jenkins_password" --with-decryption --query 'Parameter.Value' --output text 2>/dev/null || echo "$JENKINS_ADMIN_PASSWORD")
     export SSH_KEY_PATH=$(aws ssm get-parameter --name "/devops/ssh_key_path" --query 'Parameter.Value' --output text 2>/dev/null || echo "$SSH_KEY_PATH")
+    
+    # Load SMTP/Email credentials
+    export SMTP_HOST=$(aws ssm get-parameter --name "/devops/smtp_host" --query 'Parameter.Value' --output text 2>/dev/null || echo "$SMTP_HOST")
+    export SMTP_PORT=$(aws ssm get-parameter --name "/devops/smtp_port" --query 'Parameter.Value' --output text 2>/dev/null || echo "$SMTP_PORT")
+    export SMTP_USERNAME=$(aws ssm get-parameter --name "/devops/smtp_username" --query 'Parameter.Value' --output text 2>/dev/null || echo "$SMTP_USERNAME")
+    export SMTP_PASSWORD=$(aws ssm get-parameter --name "/devops/smtp_password" --with-decryption --query 'Parameter.Value' --output text 2>/dev/null || echo "$SMTP_PASSWORD")
     
     log_success "Loaded credentials from Parameter Store"
     return 0
@@ -272,6 +284,15 @@ check_prerequisites() {
         log_warning "DOCKER_HUB_TOKEN not set. Docker push will fail in Jenkins."
     else
         log_success "Docker Hub token configured"
+    fi
+    
+    # Check SMTP credentials for email notifications
+    if [[ -z "$SMTP_USERNAME" || -z "$SMTP_PASSWORD" ]]; then
+        log_warning "SMTP credentials not set. Email notifications will NOT work."
+        log_warning "Add smtp_username and smtp_password to terraform.tfvars"
+        log_warning "For Gmail: Use App Password from https://myaccount.google.com/apppasswords"
+    else
+        log_success "SMTP credentials configured (${SMTP_HOST}:${SMTP_PORT})"
     fi
     
     if [[ ${#missing[@]} -gt 0 ]]; then
@@ -448,6 +469,10 @@ run_ansible() {
         "aws_access_key=$AWS_ACCESS_KEY_ID"
         "aws_secret_key=$AWS_SECRET_ACCESS_KEY"
         "aws_region=$AWS_DEFAULT_REGION"
+        "smtp_host=$SMTP_HOST"
+        "smtp_port=$SMTP_PORT"
+        "smtp_username=$SMTP_USERNAME"
+        "smtp_password=$SMTP_PASSWORD"
     )
     
     # Setup Jenkins

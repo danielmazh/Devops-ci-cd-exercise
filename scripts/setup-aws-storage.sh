@@ -149,6 +149,12 @@ store_secrets() {
     local jenkins_password=$(grep -E "^jenkins_admin_password\s*=" "$TFVARS_FILE" | cut -d'"' -f2)
     local ssh_key_path=$(grep -E "^ssh_private_key_path\s*=" "$TFVARS_FILE" | cut -d'"' -f2)
     
+    # SMTP/Email settings
+    local smtp_host=$(grep -E "^smtp_host\s*=" "$TFVARS_FILE" | cut -d'"' -f2)
+    local smtp_port=$(grep -E "^smtp_port\s*=" "$TFVARS_FILE" | cut -d'"' -f2)
+    local smtp_username=$(grep -E "^smtp_username\s*=" "$TFVARS_FILE" | cut -d'"' -f2)
+    local smtp_password=$(grep -E "^smtp_password\s*=" "$TFVARS_FILE" | cut -d'"' -f2)
+    
     # Store each secret (overwrite if exists)
     store_parameter "/devops/docker_hub_username" "$docker_hub_username" "Docker Hub username"
     store_parameter "/devops/docker_hub_token" "$docker_hub_token" "Docker Hub token" "SecureString"
@@ -159,6 +165,12 @@ store_secrets() {
     store_parameter "/devops/jira_api_token" "$jira_api_token" "JIRA API token" "SecureString"
     store_parameter "/devops/jenkins_password" "$jenkins_password" "Jenkins admin password" "SecureString"
     store_parameter "/devops/ssh_key_path" "$ssh_key_path" "SSH key path"
+    
+    # SMTP/Email parameters
+    store_parameter "/devops/smtp_host" "$smtp_host" "SMTP server hostname"
+    store_parameter "/devops/smtp_port" "$smtp_port" "SMTP server port"
+    store_parameter "/devops/smtp_username" "$smtp_username" "SMTP username (email)"
+    store_parameter "/devops/smtp_password" "$smtp_password" "SMTP password (app password)" "SecureString"
     
     log_success "All secrets stored in Parameter Store"
 }
@@ -233,6 +245,10 @@ print_summary() {
     echo "     /devops/jira_api_token (encrypted)"
     echo "     /devops/jenkins_password (encrypted)"
     echo "     /devops/ssh_key_path"
+    echo "     /devops/smtp_host"
+    echo "     /devops/smtp_port"
+    echo "     /devops/smtp_username"
+    echo "     /devops/smtp_password (encrypted)"
     echo "     Cost: FREE (Standard tier)"
     echo ""
     echo "  🔐 DynamoDB Table (State Locking):"

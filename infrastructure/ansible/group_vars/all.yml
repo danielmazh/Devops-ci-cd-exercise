@@ -39,6 +39,16 @@ jira_project_key: "CICD"
 notification_email: "daniel.mazhbits@gmail.com"
 
 # -----------------------------------------------------------------------------
+# SMTP Configuration (for Email Notifications)
+# -----------------------------------------------------------------------------
+# For Gmail: Use App Password, not your regular password!
+# Get App Password: https://myaccount.google.com/apppasswords
+smtp_host: "smtp.gmail.com"
+smtp_port: "587"
+smtp_username: "{{ lookup('env', 'SMTP_USERNAME') | default('', true) }}"
+smtp_password: "{{ lookup('env', 'SMTP_PASSWORD') | default('', true) }}"
+
+# -----------------------------------------------------------------------------
 # SSH Settings
 # -----------------------------------------------------------------------------
 ansible_user: "ec2-user"

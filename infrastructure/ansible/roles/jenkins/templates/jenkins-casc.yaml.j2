@@ -28,3 +28,33 @@ unclassified:
   location:
     url: "http://{{ ansible_host }}:{{ jenkins_port | default(8080) }}/"
     adminAddress: "{{ notification_email | default('admin@devops-testing-app.com') }}"
+
+  # ---------------------------------------------------------------------------
+  # Email Configuration (SMTP)
+  # ---------------------------------------------------------------------------
+  mailer:
+    smtpHost: "{{ smtp_host | default('smtp.gmail.com') }}"
+    smtpPort: "{{ smtp_port | default('587') }}"
+    useSsl: false
+    useTls: true
+    charset: "UTF-8"
+    defaultSuffix: "@gmail.com"
+{% if smtp_username is defined and smtp_username %}
+    authentication:
+      username: "{{ smtp_username }}"
+      password: "{{ smtp_password }}"
+{% endif %}
+
+  email-ext:
+    defaultRecipients: "{{ notification_email | default('daniel.mazhbits@gmail.com') }}"
+    defaultReplyTo: "no-reply@devops-testing-app.com"
+    defaultContentType: "text/html"
+    mailAccount:
+      smtpHost: "{{ smtp_host | default('smtp.gmail.com') }}"
+      smtpPort: "{{ smtp_port | default('587') }}"
+      useSsl: false
+      useTls: true
+{% if smtp_username is defined and smtp_username %}
+      smtpUsername: "{{ smtp_username }}"
+      smtpPassword: "{{ smtp_password }}"
+{% endif %}
