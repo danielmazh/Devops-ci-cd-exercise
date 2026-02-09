@@ -453,31 +453,34 @@ run_ansible() {
     
     export ANSIBLE_HOST_KEY_CHECKING=False
     
-    # Build extra vars string
-    local extra_vars=(
-        "ansible_ssh_private_key_file=$SSH_KEY_PATH"
-        "docker_hub_username=$DOCKER_HUB_USERNAME"
-        "docker_hub_token=$DOCKER_HUB_TOKEN"
-        "github_username=$GITHUB_USERNAME"
-        "github_token=$GITHUB_TOKEN"
-        "github_repo=$GITHUB_REPO"
-        "jira_url=$JIRA_URL"
-        "jira_email=$JIRA_EMAIL"
-        "jira_api_token=$JIRA_API_TOKEN"
-        "jira_project_key=$JIRA_PROJECT_KEY"
-        "jenkins_admin_user=$JENKINS_ADMIN_USER"
-        "jenkins_admin_password=$JENKINS_ADMIN_PASSWORD"
-        "notification_email=$NOTIFICATION_EMAIL"
-        "app_server_ip=$APP_IP"
-        "aws_access_key=$AWS_ACCESS_KEY_ID"
-        "aws_secret_key=$AWS_SECRET_ACCESS_KEY"
-        "aws_region=$AWS_DEFAULT_REGION"
-        "smtp_host=$SMTP_HOST"
-        "smtp_port=$SMTP_PORT"
-        "smtp_username=$SMTP_USERNAME"
-        "smtp_password=$SMTP_PASSWORD"
-        "ssh_private_key_b64=$SSH_PRIVATE_KEY_B64"
-    )
+    # Create JSON file with extra vars (handles spaces in values like SMTP password) (handles spaces in values)
+    local extra_vars_file="/tmp/ansible-extra-vars.json"
+    cat > "$extra_vars_file" << EXTRAVARS_EOF
+{
+    "ansible_ssh_private_key_file": "$SSH_KEY_PATH",
+    "docker_hub_username": "$DOCKER_HUB_USERNAME",
+    "docker_hub_token": "$DOCKER_HUB_TOKEN",
+    "github_username": "$GITHUB_USERNAME",
+    "github_token": "$GITHUB_TOKEN",
+    "github_repo": "$GITHUB_REPO",
+    "jira_url": "$JIRA_URL",
+    "jira_email": "$JIRA_EMAIL",
+    "jira_api_token": "$JIRA_API_TOKEN",
+    "jira_project_key": "$JIRA_PROJECT_KEY",
+    "jenkins_admin_user": "$JENKINS_ADMIN_USER",
+    "jenkins_admin_password": "$JENKINS_ADMIN_PASSWORD",
+    "notification_email": "$NOTIFICATION_EMAIL",
+    "app_server_ip": "$APP_IP",
+    "aws_access_key": "$AWS_ACCESS_KEY_ID",
+    "aws_secret_key": "$AWS_SECRET_ACCESS_KEY",
+    "aws_region": "$AWS_DEFAULT_REGION",
+    "smtp_host": "$SMTP_HOST",
+    "smtp_port": "$SMTP_PORT",
+    "smtp_username": "$SMTP_USERNAME",
+    "smtp_password": "$SMTP_PASSWORD",
+    "ssh_private_key_b64": "$SSH_PRIVATE_KEY_B64"
+}
+EXTRAVARS_EOF
     
     # Setup Jenkins
     log_info "Setting up Jenkins server (this may take 5-10 minutes)..."
@@ -489,7 +492,7 @@ run_ansible() {
         ansible-playbook playbooks/jenkins-setup.yml \
             -i inventory/staging.ini \
             --private-key="$SSH_KEY_PATH" \
-            $(printf -- '-e %s ' "${extra_vars[@]}") \
+            -e "@$extra_vars_file" \
             -v 2>&1 | tee /tmp/ansible-jenkins.log
         
         local jenkins_result=$?
@@ -513,7 +516,7 @@ run_ansible() {
         ansible-playbook playbooks/app-setup.yml \
             -i inventory/staging.ini \
             --private-key="$SSH_KEY_PATH" \
-            $(printf -- '-e %s ' "${extra_vars[@]}") \
+            -e "@$extra_vars_file" \
             -v 2>&1 | tee /tmp/ansible-app.log
         
         if [[ $? -ne 0 ]]; then
