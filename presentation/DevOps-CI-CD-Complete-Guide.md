@@ -16,6 +16,7 @@
 8. [Cost Management & Optimization](#8-cost-management--optimization)
 9. [Operations & Troubleshooting](#9-operations--troubleshooting)
 10. [Deployment Workflow](#10-deployment-workflow)
+11. [Project Structure - Complete File Tree](#11-project-structure---complete-file-tree)
 
 ---
 
@@ -1326,6 +1327,295 @@ aws ssm describe-parameters \
 | `terraform force-unlock <LOCK_ID>` | Unlock stuck state |
 | `terraform state list` | Show managed resources |
 | `terraform output` | Show IPs and endpoints |
+
+---
+
+# 11. Project Structure - Complete File Tree
+
+## 11.1 Full Project Tree with Explanations
+
+```
+devops-ci-cd-exercise/
+│
+├── .gitignore                          # Git ignore rules (secrets, state files, caches)
+├── README.md                           # Main project documentation
+├── requirements.txt                    # Python dependencies (Flask, pytest, selenium, locust)
+├── pytest.ini                          # Pytest configuration (markers, options)
+├── env.template                        # Template for environment variables
+│
+│
+│   ╔═══════════════════════════════════════════════════════════════════════════╗
+│   ║                         APPLICATION CODE                                   ║
+│   ╚═══════════════════════════════════════════════════════════════════════════╝
+│
+├── main.py                             # Flask application entry point
+├── calc.py                             # Calculator module (demo functions)
+│
+├── app/                                # Main application package
+│   ├── __init__.py                     # Flask app factory, configuration
+│   │
+│   ├── routes/                         # API endpoint definitions
+│   │   ├── __init__.py                 # Routes package init
+│   │   ├── user_routes.py              # User CRUD endpoints (/api/users)
+│   │   └── product_routes.py           # Product endpoints (/api/products)
+│   │
+│   └── templates/                      # Jinja2 HTML templates
+│       └── index.html                  # Main web UI template
+│
+│
+│   ╔═══════════════════════════════════════════════════════════════════════════╗
+│   ║                           TEST SUITES                                      ║
+│   ╚═══════════════════════════════════════════════════════════════════════════╝
+│
+├── tests/                              # All test code
+│   ├── __init__.py                     # Tests package init
+│   ├── test_calc.py                    # Calculator unit tests
+│   ├── test_calc_oop.py                # OOP calculator tests
+│   │
+│   ├── unit/                           # Unit tests (fast, isolated)
+│   │   ├── __init__.py
+│   │   ├── test_routes.py              # Route handler tests
+│   │   └── test_utils.py               # Utility function tests
+│   │
+│   ├── integration/                    # Integration tests (API testing)
+│   │   ├── __init__.py
+│   │   └── test_api.py                 # Full API endpoint tests
+│   │
+│   ├── e2e/                            # End-to-end tests (browser automation)
+│   │   ├── __init__.py
+│   │   └── test_web_interface.py       # Selenium + Firefox tests (9 cases)
+│   │
+│   └── performance/                    # Load/stress tests
+│       ├── __init__.py
+│       └── locustfile.py               # Locust load test scenarios
+│
+├── reports/                            # Generated test reports (gitignored)
+│   ├── pytest_report.html              # HTML test results
+│   ├── pytest_report.xml               # JUnit XML for Jenkins
+│   └── performance-report.html         # Locust performance report
+│
+│
+│   ╔═══════════════════════════════════════════════════════════════════════════╗
+│   ║                         DOCKER CONFIGURATION                               ║
+│   ╚═══════════════════════════════════════════════════════════════════════════╝
+│
+├── docker/                             # Docker build files
+│   ├── Dockerfile                      # Multi-stage app build (prod-ready)
+│   ├── Dockerfile.jenkins              # Custom Jenkins image (optional)
+│   ├── .dockerignore                   # Files to exclude from Docker context
+│   ├── docker-compose.yml              # Local development compose
+│   ├── docker-compose.prod.yml         # Production compose config
+│   ├── plugins.txt                     # Jenkins plugins list (for custom image)
+│   │
+│   └── casc/                           # Jenkins Configuration as Code
+│       └── jenkins.yaml                # Jenkins settings (local dev)
+│
+│
+│   ╔═══════════════════════════════════════════════════════════════════════════╗
+│   ║                         JENKINS CI/CD                                      ║
+│   ╚═══════════════════════════════════════════════════════════════════════════╝
+│
+├── jenkins/                            # Jenkins pipeline definitions
+│   ├── Jenkinsfile                     # Main pipeline (10 stages)
+│   ├── Jenkinsfile.prod                # Production pipeline variant
+│   ├── plugins.txt                     # Required plugins list
+│   │
+│   ├── casc/                           # Configuration as Code
+│   │   └── jenkins.yaml                # Jenkins system config
+│   │
+│   └── jobs/                           # Job DSL definitions
+│       └── seed-job.groovy             # Creates pipeline jobs programmatically
+│
+│
+│   ╔═══════════════════════════════════════════════════════════════════════════╗
+│   ║                      AUTOMATION SCRIPTS                                    ║
+│   ╚═══════════════════════════════════════════════════════════════════════════╝
+│
+├── scripts/                            # Bash automation scripts
+│   │
+│   │   # MAIN SCRIPTS (use these)
+│   ├── bootstrap-infrastructure.sh     # 🚀 DEPLOY EVERYTHING (main entry point)
+│   ├── destroy-infrastructure.sh       # 💥 TEAR DOWN infrastructure
+│   ├── setup-aws-storage.sh            # 🔧 Create S3, DynamoDB, Parameter Store
+│   │
+│   │   # UTILITY SCRIPTS
+│   ├── build-and-push.sh               # Build & push Docker image manually
+│   ├── health-check.sh                 # Check if services are running
+│   ├── run-tests.sh                    # Run test suite locally
+│   └── get-jenkins-password.sh         # Retrieve initial Jenkins password
+│
+│
+│   ╔═══════════════════════════════════════════════════════════════════════════╗
+│   ║                   INFRASTRUCTURE AS CODE                                   ║
+│   ╚═══════════════════════════════════════════════════════════════════════════╝
+│
+├── infrastructure/
+│   │
+│   │   ┌─────────────────────────────────────────────────────────────────────┐
+│   │   │                    TERRAFORM (AWS Resources)                         │
+│   │   └─────────────────────────────────────────────────────────────────────┘
+│   │
+│   ├── terraform/                      # Infrastructure as Code
+│   │   │
+│   │   │   # CONFIGURATION
+│   │   ├── main.tf                     # Provider config, data sources, locals
+│   │   ├── variables.tf                # Input variable definitions
+│   │   ├── outputs.tf                  # Output values (IPs, URLs)
+│   │   ├── terraform.tfvars.example    # Template for your credentials
+│   │   ├── terraform.tfvars            # YOUR CREDENTIALS (gitignored!)
+│   │   ├── backend.tf                  # S3 backend config (auto-generated)
+│   │   │
+│   │   │   # NETWORKING
+│   │   ├── vpc.tf                      # VPC, subnets, IGW, route tables
+│   │   ├── security_groups.tf          # Firewall rules (ports 22, 80, 8080, etc)
+│   │   │
+│   │   │   # COMPUTE
+│   │   ├── jenkins.tf                  # Jenkins EC2 (t3.large) + Elastic IP
+│   │   ├── app.tf                      # App EC2 (t3.micro) + Elastic IP
+│   │   │
+│   │   │   # SECURITY
+│   │   └── iam.tf                      # IAM roles, policies, instance profiles
+│   │
+│   │
+│   │   ┌─────────────────────────────────────────────────────────────────────┐
+│   │   │                    ANSIBLE (Server Configuration)                    │
+│   │   └─────────────────────────────────────────────────────────────────────┘
+│   │
+│   └── ansible/                        # Configuration management
+│       │
+│       ├── ansible.cfg                 # Ansible settings (SSH, timeout, etc)
+│       │
+│       │   # INVENTORY (which servers to configure)
+│       ├── inventory/
+│       │   ├── aws_ec2.yml             # Dynamic AWS inventory plugin config
+│       │   └── staging.ini             # Auto-generated static inventory
+│       │
+│       │   # VARIABLES (configuration values)
+│       ├── group_vars/
+│       │   ├── all.yml                 # Variables for ALL hosts
+│       │   ├── jenkins.yml             # Jenkins-specific variables
+│       │   └── app.yml                 # App server-specific variables
+│       │
+│       │   # PLAYBOOKS (what to do)
+│       ├── playbooks/
+│       │   ├── jenkins-setup.yml       # 🔧 Configure Jenkins server (30+ tasks)
+│       │   ├── app-setup.yml           # 🔧 Configure App server
+│       │   ├── deploy-app.yml          # 🚀 Deploy new app version
+│       │   └── rollback.yml            # ⏪ Rollback to previous version
+│       │
+│       │   # ROLES (reusable configurations)
+│       └── roles/
+│           │
+│           ├── jenkins/                # Jenkins role
+│           │   ├── tasks/
+│           │   │   └── main.yml        # Jenkins installation tasks
+│           │   ├── handlers/
+│           │   │   └── main.yml        # Restart handlers
+│           │   ├── templates/
+│           │   │   ├── docker-compose.yml.j2   # Jenkins Docker Compose
+│           │   │   └── jenkins-casc.yaml.j2    # Jenkins CasC template
+│           │   └── files/
+│           │       └── plugins.txt     # Plugin list to install
+│           │
+│           └── docker-app/             # Application deployment role
+│               ├── tasks/
+│               │   └── main.yml        # App deployment tasks
+│               ├── handlers/
+│               │   └── main.yml        # Container restart handlers
+│               └── templates/
+│                   └── docker-compose.yml.j2   # App Docker Compose
+│
+│
+│   ╔═══════════════════════════════════════════════════════════════════════════╗
+│   ║                         DOCUMENTATION                                      ║
+│   ╚═══════════════════════════════════════════════════════════════════════════╝
+│
+└── presentation/                       # Presentation materials
+    └── DevOps-CI-CD-Complete-Guide.md  # This comprehensive guide
+```
+
+## 11.2 Key Directories Explained
+
+| Directory | Purpose | When Modified |
+|-----------|---------|---------------|
+| `app/` | Flask application source code | When adding features |
+| `tests/` | All test suites (unit, integration, e2e, performance) | When adding tests |
+| `docker/` | Container build configurations | When changing build process |
+| `jenkins/` | CI/CD pipeline definitions | When modifying pipeline |
+| `scripts/` | Automation bash scripts | When changing deployment process |
+| `infrastructure/terraform/` | AWS resource definitions | When changing cloud architecture |
+| `infrastructure/ansible/` | Server configuration | When changing server setup |
+| `reports/` | Generated test reports | Auto-generated by tests |
+| `presentation/` | Documentation and guides | When updating docs |
+
+## 11.3 Critical Files Reference
+
+### Files You MUST Configure (One-time)
+
+| File | Purpose | Contains |
+|------|---------|----------|
+| `infrastructure/terraform/terraform.tfvars` | Your credentials | AWS keys, Docker Hub token, etc. |
+
+### Files Auto-Generated (Don't Edit Manually)
+
+| File | Generated By | Purpose |
+|------|--------------|---------|
+| `infrastructure/terraform/backend.tf` | `setup-aws-storage.sh` | S3 backend config |
+| `infrastructure/ansible/inventory/staging.ini` | `bootstrap-infrastructure.sh` | Server IPs |
+| `reports/*` | Jenkins pipeline | Test results |
+
+### Files That Control Pipeline Behavior
+
+| File | What It Controls |
+|------|------------------|
+| `jenkins/Jenkinsfile` | Pipeline stages, tests, deployment |
+| `requirements.txt` | Python dependencies installed |
+| `infrastructure/ansible/roles/jenkins/files/plugins.txt` | Jenkins plugins installed |
+| `docker/Dockerfile` | How app container is built |
+
+## 11.4 File Flow During Deployment
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    FILE FLOW DURING DEPLOYMENT                               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│   1. YOU RUN: ./scripts/bootstrap-infrastructure.sh                          │
+│              │                                                               │
+│              ▼                                                               │
+│   2. READS: terraform.tfvars ─────────────► Gets AWS credentials            │
+│              │                                                               │
+│              ▼                                                               │
+│   3. RUNS:  terraform apply ──────────────► Uses: main.tf, vpc.tf,          │
+│              │                               jenkins.tf, app.tf, iam.tf,     │
+│              │                               security_groups.tf              │
+│              │                               CREATES: 22 AWS resources       │
+│              ▼                                                               │
+│   4. CREATES: inventory/staging.ini ──────► Writes Jenkins/App IPs          │
+│              │                                                               │
+│              ▼                                                               │
+│   5. RUNS:  ansible-playbook jenkins-setup.yml                              │
+│              │         │                                                     │
+│              │         ├─► USES: roles/jenkins/tasks/main.yml               │
+│              │         ├─► USES: roles/jenkins/templates/*.j2               │
+│              │         └─► USES: roles/jenkins/files/plugins.txt            │
+│              │                                                               │
+│              ▼                                                               │
+│   6. ON JENKINS SERVER:                                                      │
+│      ├─► /opt/jenkins/docker-compose.yml (from template)                    │
+│      ├─► /opt/jenkins/casc/jenkins.yaml (from template)                     │
+│      ├─► /opt/jenkins/data/jobs/devops-testing-app/config.xml               │
+│      └─► /opt/jenkins/data/secrets/* (credentials)                          │
+│              │                                                               │
+│              ▼                                                               │
+│   7. JENKINS PIPELINE USES: jenkins/Jenkinsfile                              │
+│      ├─► Clones repo from GitHub                                            │
+│      ├─► Runs tests from tests/                                              │
+│      ├─► Builds from docker/Dockerfile                                       │
+│      └─► Reports to reports/                                                 │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
