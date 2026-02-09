@@ -354,20 +354,44 @@ pipeline {
                         sshUserPrivateKey(
                             credentialsId: 'aws-ssh-key',
                             keyFileVariable: 'SSH_KEY'
+                        ),
+                        usernamePassword(
+                            credentialsId: 'docker-hub-credentials',
+                            usernameVariable: 'DOCKER_USER',
+                            passwordVariable: 'DOCKER_TOKEN'
                         )
                     ]) {
-                        sh """
-                            cd infrastructure/ansible
-                            
-                            export ANSIBLE_HOST_KEY_CHECKING=False
-                            export DOCKER_HUB_TOKEN=\$(cat /var/jenkins_home/secrets/docker-hub-token 2>/dev/null || echo '')
-                            
-                            ansible-playbook playbooks/deploy-app.yml \\
-                                -i inventory/staging.ini \\
-                                --private-key=\$SSH_KEY \\
-                                -e docker_tag=${VERSION_TAG} \\
-                                -e environment=staging
-                        """
+                        // Deploy directly to app server via SSH (no Ansible needed)
+                        def appServerIp = sh(script: 'grep "app-server" infrastructure/ansible/inventory/staging.ini | grep -oP "ansible_host=\\K[0-9.]+"', returnStdout: true).trim()
+                        
+                        if (appServerIp) {
+                            sh """
+                                ssh -i \$SSH_KEY -o StrictHostKeyChecking=no ec2-user@${appServerIp} << 'DEPLOY_EOF'
+                                    set -e
+                                    echo "Pulling and deploying Docker image..."
+                                    
+                                    # Login to Docker Hub
+                                    echo "\${DOCKER_TOKEN}" | docker login -u "\${DOCKER_USER}" --password-stdin
+                                    
+                                    # Pull the new image
+                                    docker pull ${DOCKER_IMAGE}:${VERSION_TAG}
+                                    docker tag ${DOCKER_IMAGE}:${VERSION_TAG} ${DOCKER_IMAGE}:latest
+                                    
+                                    # Restart the app container
+                                    cd /opt/devops-app
+                                    docker compose down || true
+                                    docker compose up -d
+                                    
+                                    # Verify deployment
+                                    sleep 10
+                                    curl -f http://localhost:5000/health || echo "Health check pending..."
+                                    
+                                    echo "Deployment complete!"
+DEPLOY_EOF
+                            """
+                        } else {
+                            error "Could not find app server IP in inventory"
+                        }
                     }
                 }
             }
@@ -392,23 +416,50 @@ pipeline {
                 script {
                     echo "Deploying to AWS Production..."
                     
+                    // Note: In this demo, production uses the same app server as staging
+                    // In real scenarios, you'd have separate production infrastructure
                     withCredentials([
                         sshUserPrivateKey(
                             credentialsId: 'aws-ssh-key',
                             keyFileVariable: 'SSH_KEY'
+                        ),
+                        usernamePassword(
+                            credentialsId: 'docker-hub-credentials',
+                            usernameVariable: 'DOCKER_USER',
+                            passwordVariable: 'DOCKER_TOKEN'
                         )
                     ]) {
-                        sh """
-                            cd infrastructure/ansible
-                            
-                            export ANSIBLE_HOST_KEY_CHECKING=False
-                            
-                            ansible-playbook playbooks/deploy-app.yml \\
-                                -i inventory/production.ini \\
-                                --private-key=\$SSH_KEY \\
-                                -e docker_tag=${VERSION_TAG} \\
-                                -e environment=production
-                        """
+                        // Deploy directly to app server via SSH
+                        def appServerIp = sh(script: 'grep "app-server" infrastructure/ansible/inventory/staging.ini | grep -oP "ansible_host=\\K[0-9.]+"', returnStdout: true).trim()
+                        
+                        if (appServerIp) {
+                            sh """
+                                ssh -i \$SSH_KEY -o StrictHostKeyChecking=no ec2-user@${appServerIp} << 'DEPLOY_EOF'
+                                    set -e
+                                    echo "Production deployment - Pulling and deploying Docker image..."
+                                    
+                                    # Login to Docker Hub
+                                    echo "\${DOCKER_TOKEN}" | docker login -u "\${DOCKER_USER}" --password-stdin
+                                    
+                                    # Pull the specific version tag for production
+                                    docker pull ${DOCKER_IMAGE}:${VERSION_TAG}
+                                    docker tag ${DOCKER_IMAGE}:${VERSION_TAG} ${DOCKER_IMAGE}:production
+                                    
+                                    # Restart the app container
+                                    cd /opt/devops-app
+                                    docker compose down || true
+                                    docker compose up -d
+                                    
+                                    # Verify deployment
+                                    sleep 15
+                                    curl -f http://localhost:5000/health && echo "Production deployment verified!"
+                                    
+                                    echo "Production deployment complete!"
+DEPLOY_EOF
+                            """
+                        } else {
+                            error "Could not find app server IP in inventory"
+                        }
                     }
                 }
             }
@@ -516,40 +567,63 @@ def createJiraIssue() {
             usernameVariable: 'JIRA_USER',
             passwordVariable: 'JIRA_TOKEN'
         )]) {
-            def summary = "Jenkins Build Failure: ${env.JOB_NAME} #${env.BUILD_NUMBER}"
-            def description = """
-                h2. Build Failure Details
-                
-                ||Field||Value||
-                |Job Name|${env.JOB_NAME}|
-                |Build Number|${env.BUILD_NUMBER}|
-                |Branch|${env.BRANCH_NAME ?: 'N/A'}|
-                |Duration|${currentBuild.durationString}|
-                |Build URL|[View Build|${env.BUILD_URL}]|
-                |Console Log|[View Console|${env.BUILD_URL}console]|
-                
-                h2. Git Information
-                * Commit: ${env.GIT_COMMIT ?: 'N/A'}
-            """
+            def summary = "Build Failure: ${env.JOB_NAME} #${env.BUILD_NUMBER}"
             
-            def payload = """
-            {
-                "fields": {
-                    "project": {"key": "${JIRA_PROJECT_KEY}"},
-                    "summary": "${summary}",
-                    "description": ${groovy.json.JsonOutput.toJson(description)},
-                    "issuetype": {"name": "Bug"},
-                    "priority": {"name": "High"},
-                    "labels": ["jenkins", "automated", "build-failure"]
-                }
-            }
-            """
+            // JIRA API v3 requires ADF (Atlassian Document Format) for description
+            def payload = [
+                fields: [
+                    project: [key: JIRA_PROJECT_KEY],
+                    summary: summary,
+                    description: [
+                        type: "doc",
+                        version: 1,
+                        content: [
+                            [
+                                type: "heading",
+                                attrs: [level: 2],
+                                content: [[type: "text", text: "Build Failure Details"]]
+                            ],
+                            [
+                                type: "paragraph",
+                                content: [
+                                    [type: "text", text: "Job: ", marks: [[type: "strong"]]],
+                                    [type: "text", text: env.JOB_NAME]
+                                ]
+                            ],
+                            [
+                                type: "paragraph",
+                                content: [
+                                    [type: "text", text: "Build: ", marks: [[type: "strong"]]],
+                                    [type: "text", text: "#${env.BUILD_NUMBER}"]
+                                ]
+                            ],
+                            [
+                                type: "paragraph",
+                                content: [
+                                    [type: "text", text: "Duration: ", marks: [[type: "strong"]]],
+                                    [type: "text", text: currentBuild.durationString ?: "N/A"]
+                                ]
+                            ],
+                            [
+                                type: "paragraph",
+                                content: [
+                                    [type: "text", text: "Build URL: ", marks: [[type: "strong"]]],
+                                    [type: "text", text: env.BUILD_URL, marks: [[type: "link", attrs: [href: env.BUILD_URL]]]]
+                                ]
+                            ]
+                        ]
+                    ],
+                    issuetype: [name: "Bug"],
+                    priority: [name: "High"],
+                    labels: ["jenkins", "automated", "build-failure"]
+                ]
+            ]
             
             def response = httpRequest(
                 url: "https://danielmaz.atlassian.net/rest/api/3/issue",
                 httpMode: 'POST',
                 contentType: 'APPLICATION_JSON',
-                requestBody: payload,
+                requestBody: groovy.json.JsonOutput.toJson(payload),
                 authentication: 'jira-credentials',
                 validResponseCodes: '201'
             )
@@ -571,59 +645,86 @@ def createJiraSuccessIssue() {
             usernameVariable: 'JIRA_USER',
             passwordVariable: 'JIRA_TOKEN'
         )]) {
-            def summary = "✅ Build Success: ${env.JOB_NAME} #${env.BUILD_NUMBER}"
-            def description = """
-                h2. Build Success Summary
-                
-                The CI/CD pipeline completed successfully!
-                
-                h3. Build Details
-                ||Field||Value||
-                |Job Name|${env.JOB_NAME}|
-                |Build Number|#${env.BUILD_NUMBER}|
-                |Branch|${env.BRANCH_NAME ?: 'main'}|
-                |Version Tag|${VERSION_TAG}|
-                |Duration|${currentBuild.durationString}|
-                |Build URL|[View Build|${env.BUILD_URL}]|
-                
-                h3. Git Information
-                * Commit: ${env.GIT_COMMIT ?: 'N/A'}
-                * Short Commit: ${GIT_COMMIT_SHORT ?: 'N/A'}
-                
-                h3. Tests Executed
-                * Unit Tests: ✅ Passed
-                * Integration Tests: ✅ Passed
-                * E2E Tests: ${params.RUN_E2E_TESTS ? '✅ Passed' : '⏭️ Skipped'}
-                * Performance Tests: ${params.RUN_PERFORMANCE_TESTS ? '✅ Passed' : '⏭️ Skipped'}
-                
-                h3. Artifacts
-                * Docker Image: ${DOCKER_IMAGE}:${VERSION_TAG}
-                * [Coverage Report|${env.BUILD_URL}Code_20Coverage_20Report/]
-                * [Test Report|${env.BUILD_URL}testReport/]
-                
-                h3. Deployment Status
-                * Deploy to Staging: ${params.DEPLOY_TO_STAGING ? '✅ Deployed' : '⏭️ Skipped'}
-                * Deploy to Production: ${params.DEPLOY_TO_PRODUCTION ? '✅ Deployed' : '⏭️ Skipped'}
-            """
+            def summary = "Build Success: ${env.JOB_NAME} #${env.BUILD_NUMBER}"
             
-            def payload = """
-            {
-                "fields": {
-                    "project": {"key": "${JIRA_PROJECT_KEY}"},
-                    "summary": "${summary}",
-                    "description": ${groovy.json.JsonOutput.toJson(description)},
-                    "issuetype": {"name": "Task"},
-                    "priority": {"name": "Low"},
-                    "labels": ["jenkins", "automated", "build-success", "ci-cd"]
-                }
-            }
-            """
+            // Build test status strings
+            def e2eStatus = params.RUN_E2E_TESTS ? "Passed" : "Skipped"
+            def perfStatus = params.RUN_PERFORMANCE_TESTS ? "Passed" : "Skipped"
+            def stagingStatus = params.DEPLOY_TO_STAGING ? "Deployed" : "Skipped"
+            def prodStatus = params.DEPLOY_TO_PRODUCTION ? "Deployed" : "Skipped"
+            
+            // JIRA API v3 requires ADF (Atlassian Document Format) for description
+            def payload = [
+                fields: [
+                    project: [key: JIRA_PROJECT_KEY],
+                    summary: summary,
+                    description: [
+                        type: "doc",
+                        version: 1,
+                        content: [
+                            [
+                                type: "heading",
+                                attrs: [level: 2],
+                                content: [[type: "text", text: "Build Success Summary"]]
+                            ],
+                            [
+                                type: "paragraph",
+                                content: [[type: "text", text: "The CI/CD pipeline completed successfully!"]]
+                            ],
+                            [
+                                type: "heading",
+                                attrs: [level: 3],
+                                content: [[type: "text", text: "Build Details"]]
+                            ],
+                            [
+                                type: "bulletList",
+                                content: [
+                                    [type: "listItem", content: [[type: "paragraph", content: [[type: "text", text: "Job: ${env.JOB_NAME}"]]]]],
+                                    [type: "listItem", content: [[type: "paragraph", content: [[type: "text", text: "Build: #${env.BUILD_NUMBER}"]]]]],
+                                    [type: "listItem", content: [[type: "paragraph", content: [[type: "text", text: "Version: ${VERSION_TAG}"]]]]],
+                                    [type: "listItem", content: [[type: "paragraph", content: [[type: "text", text: "Duration: ${currentBuild.durationString ?: 'N/A'}"]]]]],
+                                    [type: "listItem", content: [[type: "paragraph", content: [[type: "text", text: "Build URL: ${env.BUILD_URL}"]]]]]
+                                ]
+                            ],
+                            [
+                                type: "heading",
+                                attrs: [level: 3],
+                                content: [[type: "text", text: "Tests Executed"]]
+                            ],
+                            [
+                                type: "bulletList",
+                                content: [
+                                    [type: "listItem", content: [[type: "paragraph", content: [[type: "text", text: "Unit Tests: Passed"]]]]],
+                                    [type: "listItem", content: [[type: "paragraph", content: [[type: "text", text: "Integration Tests: Passed"]]]]],
+                                    [type: "listItem", content: [[type: "paragraph", content: [[type: "text", text: "E2E Tests: ${e2eStatus}"]]]]],
+                                    [type: "listItem", content: [[type: "paragraph", content: [[type: "text", text: "Performance Tests: ${perfStatus}"]]]]]
+                                ]
+                            ],
+                            [
+                                type: "heading",
+                                attrs: [level: 3],
+                                content: [[type: "text", text: "Deployment Status"]]
+                            ],
+                            [
+                                type: "bulletList",
+                                content: [
+                                    [type: "listItem", content: [[type: "paragraph", content: [[type: "text", text: "Staging: ${stagingStatus}"]]]]],
+                                    [type: "listItem", content: [[type: "paragraph", content: [[type: "text", text: "Production: ${prodStatus}"]]]]]
+                                ]
+                            ]
+                        ]
+                    ],
+                    issuetype: [name: "Task"],
+                    priority: [name: "Low"],
+                    labels: ["jenkins", "automated", "build-success", "ci-cd"]
+                ]
+            ]
             
             def response = httpRequest(
                 url: "https://danielmaz.atlassian.net/rest/api/3/issue",
                 httpMode: 'POST',
                 contentType: 'APPLICATION_JSON',
-                requestBody: payload,
+                requestBody: groovy.json.JsonOutput.toJson(payload),
                 authentication: 'jira-credentials',
                 validResponseCodes: '201'
             )
