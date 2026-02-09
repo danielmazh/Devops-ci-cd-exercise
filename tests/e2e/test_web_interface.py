@@ -30,7 +30,7 @@ def app_server():
 @pytest.fixture
 def driver(app_server):
     firefox_options = Options()
-    # firefox_options.add_argument("--headless")
+    firefox_options.add_argument("--headless")  # Enable headless mode for CI/CD
     firefox_options.add_argument("--no-sandbox")
     firefox_options.add_argument("--disable-dev-shm-usage")
     

@@ -281,7 +281,7 @@
       command: >
         docker exec -u root jenkins bash -c 
         "apt-get update && 
-         apt-get install -y python3 python3-pip python3-venv git curl jq &&
+         apt-get install -y python3 python3-pip python3-venv git curl jq wget unzip &&
          ln -sf /usr/bin/python3 /usr/bin/python || true"
       register: python_install
       changed_when: "'Setting up python3' in python_install.stdout"
@@ -301,6 +301,48 @@
       retries: 2
       delay: 5
 
+    # -------------------------------------------------------------------------
+    # Install Browser Dependencies for E2E Tests (Selenium + Firefox)
+    # -------------------------------------------------------------------------
+    - name: Install Firefox and Xvfb for E2E tests in Jenkins container
+      command: >
+        docker exec -u root jenkins bash -c 
+        "apt-get update && 
+         apt-get install -y firefox-esr xvfb libgtk-3-0 libdbus-glib-1-2 libxt6 libx11-xcb1 &&
+         echo 'Firefox and Xvfb installed for headless E2E testing'"
+      register: firefox_install
+      changed_when: "'Firefox and Xvfb installed' in firefox_install.stdout"
+      ignore_errors: yes
+      retries: 2
+      delay: 5
+
+    - name: Download and install GeckoDriver for Selenium
+      command: >
+        docker exec -u root jenkins bash -c 
+        "GECKODRIVER_VERSION=0.34.0 &&
+         wget -q https://github.com/mozilla/geckodriver/releases/download/v\${GECKODRIVER_VERSION}/geckodriver-v\${GECKODRIVER_VERSION}-linux64.tar.gz -O /tmp/geckodriver.tar.gz &&
+         tar -xzf /tmp/geckodriver.tar.gz -C /usr/local/bin &&
+         chmod +x /usr/local/bin/geckodriver &&
+         rm /tmp/geckodriver.tar.gz &&
+         echo 'GeckoDriver installed successfully'"
+      register: geckodriver_install
+      changed_when: "'GeckoDriver installed' in geckodriver_install.stdout"
+      ignore_errors: yes
+      retries: 2
+      delay: 5
+
+    - name: Verify Firefox installation in Jenkins
+      command: docker exec jenkins firefox --version
+      register: firefox_version_jenkins
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Verify GeckoDriver installation in Jenkins
+      command: docker exec jenkins geckodriver --version
+      register: geckodriver_version_jenkins
+      changed_when: false
+      ignore_errors: yes
+
     - name: Verify Python installation in Jenkins
       command: docker exec jenkins python3 --version
       register: python_version_jenkins
@@ -318,6 +360,8 @@
         msg: |
           Python in Jenkins: {{ python_version_jenkins.stdout | default('Not installed') }}
           Docker in Jenkins: {{ docker_version_jenkins.stdout | default('Not installed') }}
+          Firefox in Jenkins: {{ firefox_version_jenkins.stdout | default('Not installed') }}
+          GeckoDriver in Jenkins: {{ geckodriver_version_jenkins.stdout | default('Not installed') }}
 
     # -------------------------------------------------------------------------
     # Display Jenkins Credentials

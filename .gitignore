@@ -68,5 +68,13 @@ terraform.rc
 # Secrets (NEVER commit)
 *.pem
 *.key
-secrets/plan.out
+secrets/
 .cursor/
+
+# Terraform plan files
+*.tfplan
+plan.out
+
+# Notes files (local only)
+*.notes
+.env.notes

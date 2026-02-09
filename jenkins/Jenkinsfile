@@ -15,7 +15,8 @@ pipeline {
     agent any
     
     parameters {
-        booleanParam(name: 'RUN_PERFORMANCE_TESTS', defaultValue: false, description: 'Run performance tests')
+        booleanParam(name: 'RUN_PERFORMANCE_TESTS', defaultValue: true, description: 'Run performance tests (Locust load testing)')
+        booleanParam(name: 'RUN_E2E_TESTS', defaultValue: true, description: 'Run E2E tests (Selenium + Firefox headless)')
         booleanParam(name: 'DEPLOY_TO_STAGING', defaultValue: false, description: 'Deploy to staging environment')
         booleanParam(name: 'DEPLOY_TO_PRODUCTION', defaultValue: false, description: 'Deploy to production environment')
     }
@@ -185,28 +186,34 @@ pipeline {
         }
         
         // =====================================================================
-        // Stage 5: E2E Tests (SKIPPED - requires browser)
+        // Stage 5: E2E Tests (Selenium + Firefox Headless)
         // =====================================================================
         stage('E2E Tests') {
             when {
-                // Skip E2E tests in CI - requires Firefox browser
-                expression { return fileExists('/usr/bin/firefox') }
+                expression { return params.RUN_E2E_TESTS == true }
             }
             steps {
                 sh """
                     . ${VENV_DIR}/bin/activate
                     export DISPLAY=:99
                     
-                    # Start virtual display
+                    # Start virtual display for Firefox
                     Xvfb :99 -screen 0 1920x1080x24 > /dev/null 2>&1 &
+                    XVFB_PID=\$!
                     sleep 3
                     
+                    # Verify Firefox is available
+                    echo "Firefox version:"
+                    firefox --version || echo "Firefox not found, tests may fail"
+                    
+                    # Run E2E tests with headless Firefox
                     pytest tests/e2e/ -v \\
                         --junit-xml=reports/e2e-tests.xml \\
                         --html=reports/e2e-tests.html \\
-                        --self-contained-html || true
+                        --self-contained-html
                     
-                    killall Xvfb || true
+                    # Cleanup
+                    kill \$XVFB_PID 2>/dev/null || true
                 """
             }
             post {
@@ -225,7 +232,7 @@ pipeline {
         }
         
         // =====================================================================
-        // Stage 6: Performance Tests (OPTIONAL)
+        // Stage 6: Performance Tests (Locust Load Testing)
         // =====================================================================
         stage('Performance Tests') {
             when {
@@ -235,12 +242,20 @@ pipeline {
                 sh """
                     . ${VENV_DIR}/bin/activate
                     
-                    # Start application
+                    echo "=========================================="
+                    echo "Starting Performance Tests with Locust"
+                    echo "=========================================="
+                    
+                    # Start application in background
                     python main.py &
                     APP_PID=\$!
-                    sleep 5
+                    echo "Started app with PID: \$APP_PID"
                     
-                    # Run Locust performance tests
+                    # Wait for app to be ready
+                    sleep 5
+                    curl -sf http://localhost:5000/health || echo "Health check warning"
+                    
+                    # Run Locust performance tests (headless mode)
                     locust -f tests/performance/locustfile.py \\
                         --headless \\
                         --users 10 \\
@@ -250,8 +265,13 @@ pipeline {
                         --html reports/performance-report.html \\
                         --csv reports/performance
                     
-                    # Cleanup
-                    kill \$APP_PID || true
+                    LOCUST_EXIT=\$?
+                    
+                    # Cleanup - kill the app
+                    kill \$APP_PID 2>/dev/null || true
+                    
+                    echo "Performance tests completed with exit code: \$LOCUST_EXIT"
+                    exit \$LOCUST_EXIT
                 """
             }
             post {
