@@ -97,23 +97,27 @@ terraform.tfvars ──► Terraform ──► Creates AWS Resources
 ### 2️⃣ Server Configuration (Ansible)
 ```
 Ansible Playbooks ──► SSH to EC2 ──► Configures Servers
-                                     • Installs Docker
-                                     • Installs Docker Compose
+                                     • Installs Docker & Docker Compose
                                      • Starts Jenkins container
+                                     • Installs all Jenkins plugins automatically
+                                     • Installs Firefox + GeckoDriver (E2E tests)
                                      • Sets up credentials
                                      • Creates pipeline job
 ```
 
 ### 3️⃣ CI/CD Pipeline (Jenkins)
 ```
-Code Push ──► Jenkins Pipeline ──► Automated Workflow
+Code Push ──► Jenkins Pipeline ──► Automated Workflow (10 Stages)
                                    • Checkout code
-                                   • Run unit tests
+                                   • Setup Python environment
+                                   • Run unit tests (pytest + coverage)
                                    • Run integration tests
-                                   • Code quality checks
+                                   • Security scan (Bandit)
+                                   • E2E tests (Selenium + Firefox headless)
+                                   • Performance tests (Locust)
                                    • Build Docker image
                                    • Push to Docker Hub
-                                   • Deploy to App server
+                                   • Deploy to staging/production (optional)
 ```
 
 ### 4️⃣ Secrets Management (AWS Parameter Store)
@@ -251,6 +255,16 @@ cd ../..
 
 **Expected time: ~10-15 minutes**
 
+**What happens during deployment:**
+1. ✅ Validates prerequisites (terraform, ansible, aws cli)
+2. ✅ Loads credentials from Parameter Store
+3. ✅ Provisions EC2 instances via Terraform
+4. ✅ Configures servers via Ansible (Docker, Jenkins)
+5. ✅ Installs 30+ Jenkins plugins automatically
+6. ✅ Installs Firefox + GeckoDriver for E2E tests
+7. ✅ Creates and loads the pipeline job
+8. ✅ Performs health checks
+
 ### Access Services
 
 After deployment:
@@ -269,7 +283,7 @@ After deployment:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                        JENKINS PIPELINE FLOW                                 │
+│                    JENKINS PIPELINE FLOW (10 Stages)                         │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
 │  ┌──────────────┐                                                           │
@@ -280,16 +294,24 @@ After deployment:
 │  │    Setup     │──────────────────────────────────────────────►           │
 │  └──────┬───────┘                                                           │
 │         ▼                                                                    │
-│  ┌──────────────┐   Flake8, Pylint, Bandit (parallel)                       │
-│  │ Code Quality │──────────────────────────────────────────────►           │
-│  └──────┬───────┘                                                           │
-│         ▼                                                                    │
 │  ┌──────────────┐   pytest with coverage (MANDATORY - must pass)            │
 │  │  Unit Tests  │──────────────────────────────────────────────►           │
 │  └──────┬───────┘                                                           │
 │         ▼                                                                    │
 │  ┌──────────────┐   API tests (MANDATORY - must pass)                       │
 │  │ Integration  │──────────────────────────────────────────────►           │
+│  └──────┬───────┘                                                           │
+│         ▼                                                                    │
+│  ┌──────────────┐   Bandit security scanner                                 │
+│  │Security Scan │──────────────────────────────────────────────►           │
+│  └──────┬───────┘                                                           │
+│         ▼                                                                    │
+│  ┌──────────────┐   Selenium + Firefox headless (9 tests)                   │
+│  │  E2E Tests   │──────────────────────────────────────────────►           │
+│  └──────┬───────┘                                                           │
+│         ▼                                                                    │
+│  ┌──────────────┐   Locust load testing (10 users, 30s)                     │
+│  │ Performance  │──────────────────────────────────────────────►           │
 │  └──────┬───────┘                                                           │
 │         ▼                                                                    │
 │  ┌──────────────┐   Multi-stage Docker build                                │
@@ -300,12 +322,12 @@ After deployment:
 │  │  Push Image  │──────────────────────────────────────────────►           │
 │  └──────┬───────┘                                                           │
 │         ▼                                                                    │
-│  ┌──────────────┐   Deploy via SSH/Ansible (optional)                       │
+│  ┌──────────────┐   Deploy via SSH (optional, requires params)              │
 │  │   Deploy     │──────────────────────────────────────────────►           │
 │  └──────┬───────┘                                                           │
 │         ▼                                                                    │
 │  ┌──────────────┐                                                           │
-│  │   SUCCESS    │   ◄── Email notification                                  │
+│  │   SUCCESS    │   ◄── Email notification + workspace cleanup              │
 │  └──────────────┘                                                           │
 │                                                                              │
 │  On FAILURE: ──► Create JIRA issue + Email notification                     │
@@ -319,7 +341,32 @@ Jenkins displays:
 - ✅ Unit test results (JUnit)
 - ✅ Code coverage report (HTML)
 - ✅ Integration test report (HTML)
+- ✅ E2E test report (HTML)
+- ✅ Performance test report (HTML)
 - ✅ Archived artifacts
+
+### Automatically Installed Components
+
+The deployment automatically installs all required components:
+
+**Jenkins Plugins (30+):**
+| Category | Plugins |
+|----------|---------|
+| Pipeline Core | workflow-job, workflow-cps, workflow-aggregator, pipeline-model-definition |
+| SCM | scm-api, workflow-scm-step, git, git-client, github |
+| Build Tools | timestamper, ansicolor, pipeline-utility-steps |
+| Testing | junit, htmlpublisher |
+| Post-Build | ws-cleanup, email-ext |
+| Credentials | credentials-binding, ssh-agent, ssh-credentials |
+| Configuration | configuration-as-code, job-dsl |
+
+**E2E Testing Tools (inside Jenkins container):**
+| Tool | Version | Purpose |
+|------|---------|---------|
+| Firefox ESR | Latest | Headless browser for Selenium |
+| GeckoDriver | 0.34.0 | WebDriver for Firefox |
+| Xvfb | Latest | Virtual display for headless mode |
+| Python 3 | Latest | Test runner |
 
 ---
 
@@ -423,6 +470,10 @@ ssh -i <KEY> ec2-user@<JENKINS_IP> "docker logs jenkins"
 | "Jenkins not accessible" | Wait 2-3 minutes after deployment, check security group |
 | "Pipeline fails at Docker push" | Verify Docker Hub token in Parameter Store |
 | "Terraform state lock" | Run `terraform force-unlock <LOCK_ID>` |
+| "No such DSL method" (plugin error) | Plugins install automatically; restart Jenkins if needed |
+| "curl package conflict" on Amazon Linux | Already fixed - curl-minimal is used instead |
+| "E2E tests fail - Firefox not found" | Firefox is auto-installed in Jenkins container |
+| "Pipeline job not loading" | Plugins install on first boot; job loads after restart |
 
 ### Debug Commands
 
