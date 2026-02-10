@@ -361,12 +361,19 @@ pipeline {
                             passwordVariable: 'DOCKER_TOKEN'
                         )
                     ]) {
-                        // Deploy directly to app server via SSH (no Ansible needed)
-                        def appServerIp = sh(script: 'grep "app-server" infrastructure/ansible/inventory/staging.ini | grep -oP "ansible_host=\\K[0-9.]+"', returnStdout: true).trim()
+                        // Use private IP for intra-VPC SSH (more reliable from Docker container)
+                        def appServerIp = sh(script: 'grep "app-server" infrastructure/ansible/inventory/staging.ini | grep -oP "private_ip=\\K[0-9.]+"', returnStdout: true).trim()
+                        
+                        // Fallback to public IP if private_ip not found
+                        if (!appServerIp) {
+                            appServerIp = sh(script: 'grep "app-server" infrastructure/ansible/inventory/staging.ini | grep -oP "ansible_host=\\K[0-9.]+"', returnStdout: true).trim()
+                            echo "Warning: Using public IP ${appServerIp} (private_ip not found in inventory)"
+                        }
                         
                         if (appServerIp) {
+                            echo "Deploying to app server at ${appServerIp} (private IP)..."
                             sh """
-                                ssh -i \$SSH_KEY -o StrictHostKeyChecking=no ec2-user@${appServerIp} << 'DEPLOY_EOF'
+                                ssh -i \$SSH_KEY -o StrictHostKeyChecking=no -o ConnectTimeout=30 ec2-user@${appServerIp} << DEPLOY_EOF
                                     set -e
                                     echo "Pulling and deploying Docker image..."
                                     
@@ -429,12 +436,19 @@ DEPLOY_EOF
                             passwordVariable: 'DOCKER_TOKEN'
                         )
                     ]) {
-                        // Deploy directly to app server via SSH
-                        def appServerIp = sh(script: 'grep "app-server" infrastructure/ansible/inventory/staging.ini | grep -oP "ansible_host=\\K[0-9.]+"', returnStdout: true).trim()
+                        // Use private IP for intra-VPC SSH (more reliable from Docker container)
+                        def appServerIp = sh(script: 'grep "app-server" infrastructure/ansible/inventory/staging.ini | grep -oP "private_ip=\\K[0-9.]+"', returnStdout: true).trim()
+                        
+                        // Fallback to public IP if private_ip not found
+                        if (!appServerIp) {
+                            appServerIp = sh(script: 'grep "app-server" infrastructure/ansible/inventory/staging.ini | grep -oP "ansible_host=\\K[0-9.]+"', returnStdout: true).trim()
+                            echo "Warning: Using public IP ${appServerIp} (private_ip not found in inventory)"
+                        }
                         
                         if (appServerIp) {
+                            echo "Deploying to production at ${appServerIp} (private IP)..."
                             sh """
-                                ssh -i \$SSH_KEY -o StrictHostKeyChecking=no ec2-user@${appServerIp} << 'DEPLOY_EOF'
+                                ssh -i \$SSH_KEY -o StrictHostKeyChecking=no -o ConnectTimeout=30 ec2-user@${appServerIp} << DEPLOY_EOF
                                     set -e
                                     echo "Production deployment - Pulling and deploying Docker image..."
                                     
