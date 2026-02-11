@@ -168,7 +168,7 @@ store_secrets() {
     
     # Store SSH private key content (base64 encoded) for Jenkins deployment credential
     if [[ -n "$ssh_key_path" && -f "$ssh_key_path" ]]; then
-        local ssh_key_b64=$(cat "$ssh_key_path" | base64)
+        local ssh_key_b64=$(base64 < "$ssh_key_path" | tr -d '\n')
         store_parameter "/devops/ssh_private_key" "$ssh_key_b64" "SSH private key (base64)" "SecureString"
     fi
     

@@ -214,7 +214,8 @@ load_credentials_from_parameter_store() {
     export SSH_KEY_PATH=$(aws ssm get-parameter --name "/devops/ssh_key_path" --query 'Parameter.Value' --output text 2>/dev/null || echo "$SSH_KEY_PATH")
     
     # Load SSH private key content (base64 encoded) for Jenkins credential
-    export SSH_PRIVATE_KEY_B64=$(aws ssm get-parameter --name "/devops/ssh_private_key" --with-decryption --query 'Parameter.Value' --output text 2>/dev/null || echo "")
+    # Strip newlines from base64 to ensure valid JSON when passed as extra-vars
+    export SSH_PRIVATE_KEY_B64=$(aws ssm get-parameter --name "/devops/ssh_private_key" --with-decryption --query 'Parameter.Value' --output text 2>/dev/null | tr -d '\n' || echo "")
     
     # Load SMTP/Email credentials
     export SMTP_HOST=$(aws ssm get-parameter --name "/devops/smtp_host" --query 'Parameter.Value' --output text 2>/dev/null || echo "$SMTP_HOST")

@@ -47,7 +47,8 @@ credentials:
               scope: GLOBAL
               privateKeySource:
                 directEntry:
-                  privateKey: "{{ ssh_private_key_b64 | b64decode }}"
+                  privateKey: |
+{{ ssh_private_key_b64 | b64decode | indent(20, True) }}
 {% endif %}
 
 jenkins:
