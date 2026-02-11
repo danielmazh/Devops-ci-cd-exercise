@@ -59,8 +59,8 @@ This project demonstrates a **complete, production-ready DevOps workflow** where
 │   │  │                     │    │                     │                     │   │
 │   │  │  • Run Tests        │    │  • Flask App        │                     │   │
 │   │  │  • Build Docker     │───►│  • Docker           │                     │   │
-│   │  │  • Push to Hub      │    │  • Health Checks    │                     │   │
-│   │  │  • Deploy App       │    │                     │                     │   │
+│   │  │  • Push to Hub      │SSH │  • Health Checks    │                     │   │
+│   │  │  • Deploy (priv IP) │    │  • gunicorn         │                     │   │
 │   │  └─────────────────────┘    └─────────────────────┘                     │   │
 │   │            │                                                             │   │
 │   │            │ pushes image                                                │   │
@@ -101,7 +101,8 @@ Ansible Playbooks ──► SSH to EC2 ──► Configures Servers
                                      • Starts Jenkins container
                                      • Installs all Jenkins plugins automatically
                                      • Installs Firefox + GeckoDriver (E2E tests)
-                                     • Sets up credentials
+                                     • Sets up credentials via CasC (Docker Hub,
+                                       GitHub, JIRA, SMTP, SSH key)
                                      • Creates pipeline job
 ```
 
@@ -115,9 +116,10 @@ Code Push ──► Jenkins Pipeline ──► Automated Workflow (10 Stages)
                                    • Security scan (Bandit)
                                    • E2E tests (Selenium + Firefox headless)
                                    • Performance tests (Locust)
-                                   • Build Docker image
+                                   • Build Docker image (--target production)
                                    • Push to Docker Hub
-                                   • Deploy to staging/production (optional)
+                                   • Deploy via SSH using private IP (optional)
+                                   • JIRA issue + Email notification (post)
 ```
 
 ### 4️⃣ Secrets Management (AWS Parameter Store)
@@ -127,6 +129,8 @@ Parameter Store (FREE) ──► Securely Stores ──► All Credentials
                                                • GitHub token
                                                • JIRA API token
                                                • Jenkins password
+                                               • SSH private key (base64)
+                                               • SMTP password (email)
                                                • SSH key path
 ```
 
@@ -176,7 +180,7 @@ Parameter Store (FREE) ──► Securely Stores ──► All Credentials
 
 All credentials are stored securely in **AWS Parameter Store** (FREE tier):
 
-### Stored Secrets (16 parameters)
+### Stored Secrets (19 parameters)
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
@@ -195,7 +199,10 @@ All credentials are stored securely in **AWS Parameter Store** (FREE tier):
 | `/devops/aws_account_id` | String | AWS account ID |
 | `/devops/ssh_key_path` | String | Local SSH key path |
 | `/devops/ssh_key_name` | String | AWS key pair name |
+| `/devops/ssh_private_key` | 🔐 SecureString | Base64-encoded SSH PEM key (for Jenkins deploys) |
 | `/devops/notification_email` | String | Email for notifications |
+| `/devops/smtp_password` | 🔐 SecureString | SMTP app password (Gmail) |
+| `/devops/smtp_user` | String | SMTP username for email notifications |
 
 ### Storage Resources
 
@@ -257,13 +264,15 @@ cd ../..
 
 **What happens during deployment:**
 1. ✅ Validates prerequisites (terraform, ansible, aws cli)
-2. ✅ Loads credentials from Parameter Store
+2. ✅ Loads credentials from Parameter Store (including base64-encoded SSH key)
 3. ✅ Provisions EC2 instances via Terraform
-4. ✅ Configures servers via Ansible (Docker, Jenkins)
-5. ✅ Installs 30+ Jenkins plugins automatically
-6. ✅ Installs Firefox + GeckoDriver for E2E tests
-7. ✅ Creates and loads the pipeline job
-8. ✅ Performs health checks
+4. ✅ Generates inventory with public + private IPs
+5. ✅ Auto-pushes inventory to Git (so Jenkins always has current IPs)
+6. ✅ Configures servers via Ansible (Docker, Jenkins, all credentials via CasC)
+7. ✅ Installs 30+ Jenkins plugins automatically
+8. ✅ Installs Firefox + GeckoDriver for E2E tests
+9. ✅ Creates and loads the pipeline job
+10. ✅ Performs health checks
 
 ### Access Services
 
@@ -314,7 +323,7 @@ After deployment:
 │  │ Performance  │──────────────────────────────────────────────►           │
 │  └──────┬───────┘                                                           │
 │         ▼                                                                    │
-│  ┌──────────────┐   Multi-stage Docker build                                │
+│  ┌──────────────┐   Multi-stage Docker build (--target production)          │
 │  │ Docker Build │──────────────────────────────────────────────►           │
 │  └──────┬───────┘                                                           │
 │         ▼                                                                    │
@@ -322,18 +331,36 @@ After deployment:
 │  │  Push Image  │──────────────────────────────────────────────►           │
 │  └──────┬───────┘                                                           │
 │         ▼                                                                    │
-│  ┌──────────────┐   Deploy via SSH (optional, requires params)              │
-│  │   Deploy     │──────────────────────────────────────────────►           │
-│  └──────┬───────┘                                                           │
+│  ┌──────────────┐   Deploy via SSH using VPC private IP (optional)          │
+│  │   Deploy     │   Staging: auto-deploy / Production: manual approval      │
+│  └──────┬───────┘──────────────────────────────────────────────►           │
 │         ▼                                                                    │
 │  ┌──────────────┐                                                           │
-│  │   SUCCESS    │   ◄── Email notification + workspace cleanup              │
+│  │   SUCCESS    │   ◄── Email + optional JIRA issue + workspace cleanup     │
 │  └──────────────┘                                                           │
 │                                                                              │
-│  On FAILURE: ──► Create JIRA issue + Email notification                     │
+│  On FAILURE: ──► Create JIRA Bug issue (always) + Email notification        │
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+### Pipeline Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `RUN_PERFORMANCE_TESTS` | `true` | Execute Locust load tests |
+| `RUN_E2E_TESTS` | `true` | Execute Selenium/Firefox E2E tests |
+| `DEPLOY_TO_STAGING` | `false` | Deploy to staging via SSH (private IP) |
+| `DEPLOY_TO_PRODUCTION` | `false` | Deploy to production (manual approval gate) |
+| `CREATE_JIRA_ON_SUCCESS` | `false` | Open a JIRA issue with build details on success |
+
+### Notifications & Integrations
+
+| Event | Action |
+|-------|--------|
+| **Build Success** | Email notification with build summary |
+| **Build Success + JIRA checked** | JIRA Task issue created with all build details |
+| **Build Failure** | JIRA Bug issue created automatically + failure email |
 
 ### Test Reports
 
@@ -474,6 +501,9 @@ ssh -i <KEY> ec2-user@<JENKINS_IP> "docker logs jenkins"
 | "curl package conflict" on Amazon Linux | Already fixed - curl-minimal is used instead |
 | "E2E tests fail - Firefox not found" | Firefox is auto-installed in Jenkins container |
 | "Pipeline job not loading" | Plugins install on first boot; job loads after restart |
+| "SSH to app server times out during deploy" | Inventory auto-pushed to Git; deploy uses private IP |
+| "Load key: error in libcrypto" | SSH key stored as base64 with `tr -d '\n'`; CasC uses YAML literal block |
+| "App not reachable after deploy" | Docker build uses `--target production` (gunicorn, not pytest) |
 
 ### Debug Commands
 

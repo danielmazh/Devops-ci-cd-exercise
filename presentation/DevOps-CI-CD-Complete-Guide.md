@@ -358,10 +358,10 @@ touch /var/log/user-data-complete
 │   │   ┌──────────────────────────────────────────────────────┐  │       │
 │   │   │              Ansible Inventory                        │  │       │
 │   │   │   [jenkins]                                          │  │       │
-│   │   │   jenkins-server ansible_host=<JENKINS_IP>           │  │       │
+│   │   │   jenkins-server ansible_host=<PUB_IP> private_ip=<PRIV_IP>│ │       │
 │   │   │                                                      │  │       │
 │   │   │   [app]                                              │  │       │
-│   │   │   app-server ansible_host=<APP_IP>                   │  │       │
+│   │   │   app-server ansible_host=<PUB_IP> private_ip=<PRIV_IP>│  │       │
 │   │   │                                                      │  │       │
 │   │   │   [all:vars]                                         │  │       │
 │   │   │   ansible_user=ec2-user                              │  │       │
@@ -602,7 +602,8 @@ services:
 │        ▼                                                                     │
 │    ┌─────────────────────────────────────────────────────────────────────┐  │
 │    │  STAGE 7: Build Docker Image                                        │  │
-│    │  • Multi-stage Dockerfile                                           │  │
+│    │  • Multi-stage Dockerfile (--target production)                     │  │
+│    │  • Builds gunicorn production image (not testing stage)             │  │
 │    │  • Tag: {username}/devops-testing-app:{BUILD}-{COMMIT}             │  │
 │    │  • Tag: {username}/devops-testing-app:latest                        │  │
 │    │  Duration: ~120 seconds                                             │  │
@@ -621,17 +622,17 @@ services:
 │    ┌─────────────────────────────────────────────────────────────────────┐  │
 │    │  STAGE 9: Deploy to Staging (CONDITIONAL)                           │  │
 │    │  • Requires: DEPLOY_TO_STAGING = true                               │  │
-│    │  • SSH to app server                                                │  │
-│    │  • Pull new Docker image                                            │  │
-│    │  • Restart container                                                │  │
+│    │  • SSH to app server via VPC private IP (from inventory)            │  │
+│    │  • Docker login, pull image, compose down/up                        │  │
+│    │  • Health check: curl localhost:5000/health                         │  │
 │    └─────────────────────────────────────────────────────────────────────┘  │
 │        │                                                                     │
 │        ▼                                                                     │
 │    ┌─────────────────────────────────────────────────────────────────────┐  │
 │    │  STAGE 10: Deploy to Production (CONDITIONAL + APPROVAL)            │  │
 │    │  • Requires: DEPLOY_TO_PRODUCTION = true                            │  │
-│    │  • Manual approval gate                                             │  │
-│    │  • Zero-downtime deployment                                         │  │
+│    │  • Manual approval gate ("Deploy or Abort")                         │  │
+│    │  • Same SSH deploy via private IP as staging                        │  │
 │    └─────────────────────────────────────────────────────────────────────┘  │
 │        │                                                                     │
 │        ▼                                                                     │
@@ -644,12 +645,13 @@ services:
 │    │  └──────────────────────────────────────────────────────────────┘ │   │
 │    │  ┌──────────────────────────────────────────────────────────────┐ │   │
 │    │  │ ON SUCCESS:                                                  │ │   │
-│    │  │ • Send success email with build details                      │ │   │
+│    │  │ • Create JIRA success issue (if CREATE_JIRA_ON_SUCCESS)      │ │   │
+│    │  │ • Send success email with build details + JIRA link          │ │   │
 │    │  │ • Include links to coverage report                           │ │   │
 │    │  └──────────────────────────────────────────────────────────────┘ │   │
 │    │  ┌──────────────────────────────────────────────────────────────┐ │   │
 │    │  │ ON FAILURE:                                                  │ │   │
-│    │  │ • Create JIRA issue automatically                            │ │   │
+│    │  │ • Create JIRA Bug issue automatically (always)               │ │   │
 │    │  │ • Send failure email with JIRA link                          │ │   │
 │    │  │ • Include failed stage information                           │ │   │
 │    │  └──────────────────────────────────────────────────────────────┘ │   │
@@ -671,8 +673,9 @@ services:
 |-----------|---------|------|-------------|
 | `RUN_PERFORMANCE_TESTS` | `true` | Boolean | Execute Locust load tests |
 | `RUN_E2E_TESTS` | `true` | Boolean | Execute Selenium/Firefox tests |
-| `DEPLOY_TO_STAGING` | `false` | Boolean | Deploy to staging server |
-| `DEPLOY_TO_PRODUCTION` | `false` | Boolean | Deploy to production (with approval) |
+| `DEPLOY_TO_STAGING` | `false` | Boolean | Deploy to staging server via SSH (private IP) |
+| `DEPLOY_TO_PRODUCTION` | `false` | Boolean | Deploy to production (with manual approval gate) |
+| `CREATE_JIRA_ON_SUCCESS` | `false` | Boolean | Create a JIRA issue with build details on success |
 
 ## 5.3 Environment Variables
 
@@ -916,6 +919,9 @@ class WebsiteUser(HttpUser):
 │   │   │ /devops/jira_api_token        SecureString  "ATATT..."      │   │  │
 │   │   │ /devops/jenkins_password      SecureString  "DevOps2026!"   │   │  │
 │   │   │ /devops/ssh_key_path          String        "/path/to/key"  │   │  │
+│   │   │ /devops/ssh_private_key       SecureString  base64(PEM key) │   │  │
+│   │   │ /devops/smtp_password         SecureString  "app password"  │   │  │
+│   │   │ /devops/notification_email    String        "daniel@..."    │   │  │
 │   │   └─────────────────────────────────────────────────────────────┘   │  │
 │   │                                                                      │  │
 │   │   ENCRYPTION: AES-256 with AWS KMS                                   │  │
@@ -936,12 +942,16 @@ class WebsiteUser(HttpUser):
 │   ┌──────────────────────────────────────────────────────────────────────┐  │
 │   │   JENKINS CONTAINER (Runtime)                                        │  │
 │   │   ┌─────────────────────────────────────────────────────────────┐   │  │
+│   │   │ Files:                                                      │   │  │
 │   │   │ /var/jenkins_home/secrets/docker-username                   │   │  │
 │   │   │ /var/jenkins_home/secrets/docker-password                   │   │  │
 │   │   │                                                             │   │  │
-│   │   │ Jenkinsfile reads:                                          │   │  │
-│   │   │ DOCKER_USER=$(cat /var/jenkins_home/secrets/docker-username)│   │  │
-│   │   │ DOCKER_PASS=$(cat /var/jenkins_home/secrets/docker-password)│   │  │
+│   │   │ CasC-managed credentials (jenkins.yaml):                    │   │  │
+│   │   │ • dockerhub-credentials  (Username + Password)              │   │  │
+│   │   │ • github-token           (Username + Password)              │   │  │
+│   │   │ • aws-ssh-key            (SSH Private Key - PEM)            │   │  │
+│   │   │ • smtp-credentials       (Username + Password)              │   │  │
+│   │   │ • jira-credentials       (Username + Password)              │   │  │
 │   │   └─────────────────────────────────────────────────────────────┘   │  │
 │   │                                                                      │  │
 │   │   SECRETS NEVER IN:                                                  │  │
@@ -1253,9 +1263,11 @@ cd ../..
 │   │   What happens:                                                      │   │
 │   │   1. Loads credentials from Parameter Store                          │   │
 │   │   2. Creates 22 AWS resources via Terraform                          │   │
-│   │   3. Configures servers via Ansible                                  │   │
-│   │   4. Installs 30+ Jenkins plugins                                    │   │
-│   │   5. Displays access URLs                                            │   │
+│   │   3. Generates inventory with public + private IPs                   │   │
+│   │   4. Auto-pushes inventory to Git (Jenkins uses current IPs)         │   │
+│   │   5. Configures servers via Ansible                                  │   │
+│   │   6. Installs 30+ Jenkins plugins                                    │   │
+│   │   7. Displays access URLs                                            │   │
 │   │                                                                      │   │
 │   │   Duration: 10-15 minutes                                            │   │
 │   └─────────────────────────────────────────────────────────────────────┘   │
@@ -1591,7 +1603,10 @@ devops-ci-cd-exercise/
 │              │                               security_groups.tf              │
 │              │                               CREATES: 22 AWS resources       │
 │              ▼                                                               │
-│   4. CREATES: inventory/staging.ini ──────► Writes Jenkins/App IPs          │
+│   4. CREATES: inventory/staging.ini ──────► Writes public + private IPs     │
+│              │                                                               │
+│              ▼                                                               │
+│   4b. PUSHES staging.ini to Git ────────► Jenkins clones current IPs        │
 │              │                                                               │
 │              ▼                                                               │
 │   5. RUNS:  ansible-playbook jenkins-setup.yml                              │
@@ -1609,9 +1624,10 @@ devops-ci-cd-exercise/
 │              │                                                               │
 │              ▼                                                               │
 │   7. JENKINS PIPELINE USES: jenkins/Jenkinsfile                              │
-│      ├─► Clones repo from GitHub                                            │
+│      ├─► Clones repo from GitHub (includes staging.ini with IPs)            │
 │      ├─► Runs tests from tests/                                              │
-│      ├─► Builds from docker/Dockerfile                                       │
+│      ├─► Builds from docker/Dockerfile (--target production)                 │
+│      ├─► Deploys to app server via SSH using private IP from inventory       │
 │      └─► Reports to reports/                                                 │
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
