@@ -14,7 +14,7 @@ services:
       - "{{ jenkins_port | default(8080) }}:8080"
       - "{{ jenkins_agent_port | default(50000) }}:50000"
     environment:
-      - JAVA_OPTS={{ jenkins_java_opts | default('-Djenkins.install.runSetupWizard=false -Dhudson.model.DownloadService.noSignatureCheck=true') }}
+      - JAVA_OPTS={{ jenkins_java_opts | default('-Djenkins.install.runSetupWizard=false -Dhudson.model.DownloadService.noSignatureCheck=true -Dhudson.model.DirectoryBrowserSupport.CSP=""') }}
       - CASC_JENKINS_CONFIG=/var/jenkins_home/casc_configs
       # Docker Hub credentials
       - DOCKER_HUB_USERNAME={{ docker_hub_username }}
