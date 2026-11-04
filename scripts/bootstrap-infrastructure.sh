@@ -172,7 +172,7 @@ load_credentials_from_tfvars() {
     
     # Export Jenkins credentials
     export JENKINS_ADMIN_USER=$(grep -E "^jenkins_admin_user\s*=" "$tfvars" | cut -d'"' -f2 || echo "admin")
-    export JENKINS_ADMIN_PASSWORD=$(grep -E "^jenkins_admin_password\s*=" "$tfvars" | cut -d'"' -f2 || echo "DevOps2026!")
+    export JENKINS_ADMIN_PASSWORD=$(grep -E "^jenkins_admin_password\s*=" "$tfvars" | cut -d'"' -f2 || echo "CHANGE_ME")
     
     # Export SSH key path (note: it's ssh_private_key_path in tfvars)
     export SSH_KEY_PATH=$(grep -E "^ssh_private_key_path\s*=" "$tfvars" | cut -d'"' -f2 || echo "")
@@ -319,7 +319,7 @@ run_terraform() {
     if [[ "$DRY_RUN" == true ]]; then
         log_info "[DRY-RUN] Would run: terraform init"
     else
-        terraform init -upgrade
+        terraform init -upgrade -backend-config="bucket=devops-tfstate-$(aws sts get-caller-identity --query Account --output text)"
     fi
     
     # Plan
@@ -755,7 +755,7 @@ print_summary() {
 
   🔑 Jenkins Credentials:
      Username: ${JENKINS_ADMIN_USER:-admin}
-     Password: ${JENKINS_ADMIN_PASSWORD:-DevOps2026!}
+     Password: ${JENKINS_ADMIN_PASSWORD:-CHANGE_ME}
 
   🔗 SSH Commands:
      Jenkins: ssh -i $SSH_KEY_PATH ec2-user@${JENKINS_IP}

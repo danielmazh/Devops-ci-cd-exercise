@@ -208,7 +208,7 @@ All credentials are stored securely in **AWS Parameter Store** (FREE tier):
 
 | Resource | Name | Purpose | Cost |
 |----------|------|---------|------|
-| **S3 Bucket** | `devops-tfstate-632008729195` | Terraform state | ~$0.001/month |
+| **S3 Bucket** | `devops-tfstate-<account-id>` | Terraform state | ~$0.001/month |
 | **DynamoDB** | `devops-tfstate-lock` | State locking | FREE |
 | **Parameter Store** | `/devops/*` | Secrets | FREE |
 
@@ -230,7 +230,7 @@ jq --version         # >= 1.6
 
 | File | Location | Purpose |
 |------|----------|---------|
-| SSH Key | `/Users/danielmazmazhbits/keys/devops-key-private-account.pem` | EC2 access |
+| SSH Key | `~/keys/devops-key-private-account.pem` | EC2 access |
 | Terraform vars | `infrastructure/terraform/terraform.tfvars` | AWS credentials |
 
 ---
@@ -280,7 +280,7 @@ After deployment:
 
 | Service | URL | Credentials |
 |---------|-----|-------------|
-| **Jenkins** | `http://<JENKINS_IP>:8080` | admin / DevOps2026! |
+| **Jenkins** | `http://<JENKINS_IP>:8080` | admin / CHANGE_ME |
 | **App** | `http://<APP_IP>` | N/A |
 | **Pipeline** | `devops-testing-app` job | Pre-configured |
 
@@ -475,10 +475,10 @@ aws dynamodb describe-table --table-name devops-tfstate-lock
 
 ```bash
 # Connect to Jenkins server
-ssh -i /Users/danielmazmazhbits/keys/devops-key-private-account.pem ec2-user@<JENKINS_IP>
+ssh -i ~/keys/devops-key-private-account.pem ec2-user@<JENKINS_IP>
 
 # Connect to App server
-ssh -i /Users/danielmazmazhbits/keys/devops-key-private-account.pem ec2-user@<APP_IP>
+ssh -i ~/keys/devops-key-private-account.pem ec2-user@<APP_IP>
 
 # View Jenkins logs
 ssh -i <KEY> ec2-user@<JENKINS_IP> "docker logs jenkins"
@@ -493,7 +493,7 @@ ssh -i <KEY> ec2-user@<JENKINS_IP> "docker logs jenkins"
 | Issue | Solution |
 |-------|----------|
 | "AWS credentials not configured" | Check `terraform.tfvars` has correct keys |
-| "SSH key not found" | Verify path: `/Users/.../keys/devops-key-private-account.pem` |
+| "SSH key not found" | Verify path: `~/keys/devops-key-private-account.pem` |
 | "Jenkins not accessible" | Wait 2-3 minutes after deployment, check security group |
 | "Pipeline fails at Docker push" | Verify Docker Hub token in Parameter Store |
 | "Terraform state lock" | Run `terraform force-unlock <LOCK_ID>` |
@@ -608,7 +608,6 @@ devops-ci-cd-exercise/
 ## 📧 Contact
 
 - **Author:** Daniel Mazhbits
-- **Email:** daniel.mazhbits@gmail.com
 - **GitHub:** [@danielmazh](https://github.com/danielmazh)
 
 ---

@@ -38,7 +38,7 @@ ARG VERSION
 ARG GIT_COMMIT
 
 # Labels
-LABEL maintainer="daniel.mazhbits@gmail.com" \
+LABEL maintainer="danielmazh" \
       version="${VERSION}" \
       build-date="${BUILD_DATE}" \
       git-commit="${GIT_COMMIT}" \

@@ -62,7 +62,7 @@ jenkins:
       users:
         - id: "{{ jenkins_admin_user | default('admin') }}"
           name: "Administrator"
-          password: "{{ jenkins_admin_password | default('DevOps2026!') }}"
+          password: "{{ jenkins_admin_password }}"
   
   authorizationStrategy:
     loggedInUsersCanDoAnything:
@@ -74,7 +74,7 @@ jenkins:
 unclassified:
   location:
     url: "http://{{ ansible_host }}:{{ jenkins_port | default(8080) }}/"
-    adminAddress: "{{ notification_email | default('admin@devops-testing-app.com') }}"
+    adminAddress: "{{ notification_email }}"
 
   # ---------------------------------------------------------------------------
   # Email Configuration (SMTP)
@@ -93,7 +93,7 @@ unclassified:
 {% endif %}
 
   email-ext:
-    defaultRecipients: "{{ notification_email | default('daniel.mazhbits@gmail.com') }}"
+    defaultRecipients: "{{ notification_email }}"
     defaultReplyTo: "no-reply@devops-testing-app.com"
     defaultContentType: "text/html"
     mailAccount:

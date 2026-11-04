@@ -217,7 +217,7 @@ create_backend_config() {
 
 terraform {
   backend "s3" {
-    bucket         = "$BUCKET_NAME"
+    # bucket is passed at init: -backend-config="bucket=$BUCKET_NAME"
     key            = "devops-testing-app/terraform.tfstate"
     region         = "$AWS_DEFAULT_REGION"
     encrypt        = true
@@ -227,7 +227,7 @@ terraform {
 EOF
 
     log_success "Created backend.tf"
-    log_warning "Run 'terraform init -migrate-state' to migrate existing state to S3"
+    log_warning "Run 'terraform init -migrate-state -backend-config=\"bucket=$BUCKET_NAME\"' to migrate existing state to S3"
 }
 
 # Print summary
@@ -263,7 +263,7 @@ print_summary() {
     echo "     Cost: FREE (on-demand, minimal usage)"
     echo ""
     echo "  📋 Next Steps:"
-    echo "     1. Run: cd infrastructure/terraform && terraform init -migrate-state"
+    echo "     1. Run: cd infrastructure/terraform && terraform init -migrate-state -backend-config=\"bucket=$BUCKET_NAME\""
     echo "     2. Confirm state migration when prompted"
     echo "     3. Run bootstrap-infrastructure.sh as usual"
     echo ""

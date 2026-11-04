@@ -48,7 +48,7 @@ variable "environment" {
 variable "owner_email" {
   description = "Owner email for tagging"
   type        = string
-  default     = "daniel.mazhbits@gmail.com"
+  default     = ""  # set in terraform.tfvars
 }
 
 # -----------------------------------------------------------------------------
@@ -193,5 +193,5 @@ variable "jenkins_admin_password" {
   description = "Jenkins admin password"
   type        = string
   sensitive   = true
-  default     = "admin123!"
+  default     = ""  # set in terraform.tfvars
 }

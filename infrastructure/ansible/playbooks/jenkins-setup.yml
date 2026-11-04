@@ -21,13 +21,13 @@
     docker_hub_username: "{{ lookup('env', 'DOCKER_HUB_USERNAME') | default('danielmazh', true) }}"
     docker_hub_token: "{{ lookup('env', 'DOCKER_HUB_TOKEN') | default('', true) }}"
     github_token: "{{ lookup('env', 'GITHUB_TOKEN') | default('', true) }}"
-    jira_url: "{{ lookup('env', 'JIRA_URL') | default('https://danielmaz.atlassian.net', true) }}"
-    jira_email: "{{ lookup('env', 'JIRA_EMAIL') | default('daniel.mazhbits@gmail.com', true) }}"
+    jira_url: "{{ lookup('env', 'JIRA_URL') }}"
+    jira_email: "{{ lookup('env', 'JIRA_EMAIL') }}"
     jira_api_token: "{{ lookup('env', 'JIRA_API_TOKEN') | default('', true) }}"
     jira_project_key: "{{ lookup('env', 'JIRA_PROJECT_KEY') | default('CICD', true) }}"
-    notification_email: "{{ lookup('env', 'NOTIFICATION_EMAIL') | default('daniel.mazhbits@gmail.com', true) }}"
+    notification_email: "{{ lookup('env', 'NOTIFICATION_EMAIL') }}"
     jenkins_admin_user: "{{ lookup('env', 'JENKINS_ADMIN_USER') | default('admin', true) }}"
-    jenkins_admin_password: "{{ lookup('env', 'JENKINS_ADMIN_PASSWORD') | default('DevOps2026!', true) }}"
+    jenkins_admin_password: "{{ lookup('env', 'JENKINS_ADMIN_PASSWORD') }}"
     jenkins_port: 8080
     jenkins_agent_port: 50000
     app_server_ip: "{{ hostvars['app-server']['ansible_host'] | default('') }}"

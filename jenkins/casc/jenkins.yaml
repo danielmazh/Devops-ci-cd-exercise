@@ -44,11 +44,11 @@ jenkins:
           - key: "DOCKER_HUB_USERNAME"
             value: "${DOCKER_HUB_USERNAME}"
           - key: "JIRA_URL"
-            value: "${JIRA_URL:-https://danielmaz.atlassian.net}"
+            value: "${JIRA_URL:-}"
           - key: "JIRA_PROJECT_KEY"
             value: "${JIRA_PROJECT_KEY:-CICD}"
           - key: "NOTIFICATION_EMAIL"
-            value: "${NOTIFICATION_EMAIL:-daniel.mazhbits@gmail.com}"
+            value: "${NOTIFICATION_EMAIL:-}"
           - key: "APP_SERVER_IP"
             value: "${APP_SERVER_IP}"
 
