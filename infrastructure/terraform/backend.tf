@@ -7,7 +7,7 @@
 
 terraform {
   backend "s3" {
-    bucket         = "devops-tfstate-632008729195"
+    # bucket is passed at init: -backend-config="bucket=devops-tfstate-<account-id>"
     key            = "devops-testing-app/terraform.tfstate"
     region         = "us-east-1"
     encrypt        = true

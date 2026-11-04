@@ -11,7 +11,7 @@ jenkins_port: 8080
 jenkins_agent_port: 50000
 
 jenkins_admin_user: "admin"
-jenkins_admin_password: "{{ lookup('env', 'JENKINS_ADMIN_PASSWORD') | default('DevOps2026!', true) }}"
+jenkins_admin_password: "{{ lookup('env', 'JENKINS_ADMIN_PASSWORD') }}"
 
 # Jenkins Java options
 jenkins_java_opts: >-

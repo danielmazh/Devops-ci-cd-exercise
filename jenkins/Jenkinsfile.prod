@@ -306,7 +306,7 @@ pipeline {
                         </table>
                         <p><a href="${env.BUILD_URL}">View Build Details</a></p>
                     """,
-                    to: 'daniel.mazhbits@gmail.com',
+                    to: env.NOTIFICATION_EMAIL,
                     mimeType: 'text/html'
                 )
             }
@@ -335,7 +335,7 @@ pipeline {
                     
                     try {
                         httpRequest(
-                            url: "https://danielmaz.atlassian.net/rest/api/3/issue",
+                            url: "${env.JIRA_URL}/rest/api/3/issue",
                             httpMode: 'POST',
                             contentType: 'APPLICATION_JSON',
                             requestBody: payload,
@@ -354,7 +354,7 @@ pipeline {
                         <p><strong>Immediate attention required!</strong></p>
                         <p><a href="${env.BUILD_URL}">View Build Details</a></p>
                     """,
-                    to: 'daniel.mazhbits@gmail.com',
+                    to: env.NOTIFICATION_EMAIL,
                     mimeType: 'text/html'
                 )
             }

@@ -454,7 +454,7 @@ destroy() {
     # Initialize terraform if needed
     if [[ ! -d ".terraform" ]]; then
         log_info "Initializing Terraform..."
-        terraform init -upgrade 2>/dev/null || terraform init
+        terraform init -upgrade -backend-config="bucket=devops-tfstate-$(aws sts get-caller-identity --query Account --output text)" 2>/dev/null || terraform init -backend-config="bucket=devops-tfstate-$(aws sts get-caller-identity --query Account --output text)"
     fi
     
     # Show current resources

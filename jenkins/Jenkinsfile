@@ -41,7 +41,7 @@ pipeline {
         JIRA_PROJECT_KEY = 'CICD'
         
         // Notification
-        NOTIFICATION_EMAIL = 'daniel.mazhbits@gmail.com'
+        // NOTIFICATION_EMAIL comes from the Jenkins global env (see jenkins/casc/jenkins.yaml). 2026-11-04
     }
     
     options {
@@ -525,7 +525,7 @@ DEPLOY_EOF
                             <tr><td><strong>Branch</strong></td><td>${env.BRANCH_NAME ?: 'N/A'}</td></tr>
                             <tr><td><strong>Version</strong></td><td>${VERSION_TAG}</td></tr>
                             <tr><td><strong>Duration</strong></td><td>${currentBuild.durationString}</td></tr>
-                            ${jiraIssueKey ? "<tr><td><strong>JIRA Issue</strong></td><td><a href='https://danielmaz.atlassian.net/browse/${jiraIssueKey}'>${jiraIssueKey}</a></td></tr>" : ''}
+                            ${jiraIssueKey ? "<tr><td><strong>JIRA Issue</strong></td><td><a href='${env.JIRA_URL}/browse/${jiraIssueKey}'>${jiraIssueKey}</a></td></tr>" : ''}
                         </table>
                         <p><a href="${env.BUILD_URL}">View Build Details</a></p>
                         <p><a href="${env.BUILD_URL}Code_20Coverage_20Report/">View Coverage Report</a></p>
@@ -554,7 +554,7 @@ DEPLOY_EOF
                             <tr><td><strong>Branch</strong></td><td>${env.BRANCH_NAME ?: 'N/A'}</td></tr>
                             <tr><td><strong>Duration</strong></td><td>${currentBuild.durationString}</td></tr>
                             <tr><td><strong>Failed Stage</strong></td><td>${env.STAGE_NAME ?: 'Unknown'}</td></tr>
-                            ${jiraIssueKey ? "<tr><td><strong>JIRA Issue</strong></td><td><a href='https://danielmaz.atlassian.net/browse/${jiraIssueKey}'>${jiraIssueKey}</a></td></tr>" : ''}
+                            ${jiraIssueKey ? "<tr><td><strong>JIRA Issue</strong></td><td><a href='${env.JIRA_URL}/browse/${jiraIssueKey}'>${jiraIssueKey}</a></td></tr>" : ''}
                         </table>
                         <p><a href="${env.BUILD_URL}">View Build Details</a></p>
                         <p><a href="${env.BUILD_URL}console">View Console Log</a></p>
@@ -635,7 +635,7 @@ def createJiraIssue() {
             ]
             
             def response = httpRequest(
-                url: "https://danielmaz.atlassian.net/rest/api/3/issue",
+                url: "${env.JIRA_URL}/rest/api/3/issue",
                 httpMode: 'POST',
                 contentType: 'APPLICATION_JSON',
                 requestBody: groovy.json.JsonOutput.toJson(payload),
@@ -736,7 +736,7 @@ def createJiraSuccessIssue() {
             ]
             
             def response = httpRequest(
-                url: "https://danielmaz.atlassian.net/rest/api/3/issue",
+                url: "${env.JIRA_URL}/rest/api/3/issue",
                 httpMode: 'POST',
                 contentType: 'APPLICATION_JSON',
                 requestBody: groovy.json.JsonOutput.toJson(payload),
